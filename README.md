@@ -99,7 +99,7 @@ ANTHROPIC_API_KEY=no-key \
     -k 5 -n 1
 ```
 
-The agent rewrites `localhost` to `host.docker.internal` automatically so the Docker container can reach your host machine.
+When `ANTHROPIC_BASE_URL` is set, the script automatically rewrites `localhost` to `host.docker.internal`, enables Docker host networking (`network_mode=host`), and passes the env vars into the container.
 
 ## Sample GitHub-name agent: `cchuter`
 

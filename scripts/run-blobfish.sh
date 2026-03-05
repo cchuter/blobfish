@@ -22,6 +22,7 @@ fi
 
 TASK="${2:-}"
 PROMPT_VARIANT="full"
+NO_PROMPT=false
 TIMEOUT_MULT="1.0"
 K=1
 N=1
@@ -32,6 +33,7 @@ EXTRA_ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --slim) PROMPT_VARIANT="slim" ;;
+    --no-prompt) NO_PROMPT=true ;;
     --fast) TIMEOUT_MULT="0.5" ;;
     --leaderboard) K=5; TIMEOUT_MULT="1.0"; N=4 ;;
     --claude) BACKEND="claude" ;;
@@ -45,7 +47,9 @@ if [[ -n "$TASK" ]]; then
   EXTRA_ARGS+=( -t "${TASK}*" )
 fi
 
-if [[ "$PROMPT_VARIANT" == "slim" ]]; then
+if [[ "$NO_PROMPT" == true ]]; then
+  EXTRA_ARGS+=( --no-prompt )
+elif [[ "$PROMPT_VARIANT" == "slim" ]]; then
   EXTRA_ARGS+=( --slim-prompt )
 fi
 
