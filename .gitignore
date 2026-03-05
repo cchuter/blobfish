@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Harbor/TBench artifacts
+jobs/
+runs/
+harbor-venv/
+
+# Local env files
+.env
+agents/*/secrets.env
+
+# Internal Docs
+docs/
+
