@@ -27,6 +27,7 @@ OPENAI_API_KEY=""
 MAX_THINKING_TOKENS=""
 NO_PROMPT=false
 SLIM_PROMPT=false
+PROMPT_VARIANT="auto"
 EXTRA_ARGS=()
 
 usage() {
@@ -54,6 +55,7 @@ Routing options:
 Prompt options:
   --no-prompt                    Disable prompt template (use_prompt=false)
   --slim-prompt                  Use slim prompt variant (prompt_variant=slim)
+  --prompt-variant NAME          Prompt variant: auto, full, slim, minimax-m2.5
 
 Claude options:
   --max-thinking-tokens N        MAX_THINKING_TOKENS passed to BlobfishAgent
@@ -92,6 +94,7 @@ while [[ $# -gt 0 ]]; do
     --max-thinking-tokens) MAX_THINKING_TOKENS="$2"; shift 2 ;;
     --no-prompt) NO_PROMPT=true; shift ;;
     --slim-prompt) SLIM_PROMPT=true; shift ;;
+    --prompt-variant) PROMPT_VARIANT="$2"; shift 2 ;;
     --openai-base-url) OPENAI_BASE_URL="$2"; shift 2 ;;
     --openai-api-key) OPENAI_API_KEY="$2"; shift 2 ;;
     --job-name) JOB_NAME="$2"; shift 2 ;;
@@ -188,6 +191,8 @@ if [[ "$NO_PROMPT" == true ]]; then
   CMD+=( --ak "use_prompt=false" )
 elif [[ "$SLIM_PROMPT" == true ]]; then
   CMD+=( --ak "prompt_variant=slim" )
+else
+  CMD+=( --ak "prompt_variant=$PROMPT_VARIANT" )
 fi
 if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
   CMD+=( "${EXTRA_ARGS[@]}" )

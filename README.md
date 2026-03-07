@@ -16,9 +16,12 @@ Open starter agent framework for Terminal-Bench.
 
 - The Harbor agent implementation benchmark adapter:
   `harbor/src/blobfish_harbor/agent.py`
-- Prompt variants Harbor setup:
+- Prompt/`CLAUDE.md` template setup:
   - `harbor/src/blobfish_harbor/templates/prompt.md.j2` (full)
   - `harbor/src/blobfish_harbor/templates/prompt-slim.md.j2` (slim)
+  - `harbor/src/blobfish_harbor/templates/prompt-minimax-m25.md.j2` (MiniMax M2.5 local-model profile)
+  - `harbor/src/blobfish_harbor/templates/claude-project-default.md` (default project instructions)
+  - `harbor/src/blobfish_harbor/templates/claude-project-minimax-m25.md` (MiniMax M2.5 project instructions)
 - Scripts for agent identity scaffolding and benchmark runs
 - A submission metadata helper to keep leaderboard fields consistent
 
@@ -101,6 +104,8 @@ ANTHROPIC_API_KEY=no-key \
 
 When `ANTHROPIC_BASE_URL` is set, the script automatically rewrites `localhost` to `host.docker.internal`, enables Docker host networking (`network_mode=host`), and passes the env vars into the container.
 
+MiniMax M2.5 runs now use a model-specific `CLAUDE.md` and prompt profile automatically. That tuning is limited to agent instructions; it does not modify benchmark tasks, resources, or timeout behavior.
+
 ## Sample GitHub-name agent: `cchuter`
 
 This repo includes a sample username-mapped agent profile and class:
@@ -122,11 +127,17 @@ Run it directly:
 Prompt variants:
 
 ```bash
-# Full prompt (default)
+# Auto prompt selection (default)
 ./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude -k 1
+
+# Explicit full prompt
+./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --prompt-variant full -k 1
 
 # Slim prompt
 ./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --slim-prompt -k 1
+
+# Explicit MiniMax M2.5 prompt
+./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --prompt-variant minimax-m2.5 --model minimax/minimax-m2.5 -k 1
 
 # No prompt template
 ./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --no-prompt -k 1
@@ -134,6 +145,8 @@ Prompt variants:
 # Single task
 ./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude -t "fix-git*" -k 1 -n 1
 ```
+
+When `prompt_variant=auto`, Blobfish uses the MiniMax-specific prompt + `CLAUDE.md` profile only for `minimax/minimax-m2.5`; all other models stay on the default profile.
 
 ## Leaderboard metadata contract
 
@@ -154,6 +167,17 @@ Generate a clean metadata payload from a Harbor job:
 ```
 
 This writes `jobs/<job-id>/blobfish-submission.json`.
+
+## Leaderboard compliance
+
+Leaderboard submissions must keep the benchmark configuration unchanged:
+
+- keep `timeout_multiplier=1.0`
+- do not add agent/verifier timeout overrides
+- do not add CPU, memory, or storage overrides
+- do not modify benchmark tasks or verifier behavior
+
+Blobfish model-specific prompt tuning is intended to stay within those rules by changing only agent instructions. See the leaderboard docs: https://www.tbench.ai/docs/submitting-to-leaderboard and the Terminal-Bench 2.0 leaderboard validation rules: https://huggingface.co/datasets/harborframework/terminal-bench-2-leaderboard
 
 ## Repository layout
 

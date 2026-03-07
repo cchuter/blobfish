@@ -20,6 +20,7 @@ from harbor.models.agent.context import AgentContext
 from harbor.models.trial.result import AgentInfo, ModelInfo
 
 DEFAULT_AGENT_ORG = "teamblobfish.com"
+TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
 class BlobfishAgent(BaseInstalledAgent):
@@ -38,22 +39,19 @@ class BlobfishAgent(BaseInstalledAgent):
         reasoning_effort: str | None = "high",
         max_thinking_tokens: int | None = None,
         use_prompt: bool = True,
-        prompt_variant: str = "full",
+        prompt_variant: str = "auto",
         *args,
         **kwargs,
     ):
+        requested_prompt_variant = _normalize_prompt_variant(prompt_variant)
+        resolved_prompt_variant = _resolve_prompt_variant(
+            requested_prompt_variant,
+            kwargs.get("model_name") or default_model,
+        )
         if not use_prompt or str(use_prompt).lower() == "false":
             kwargs["prompt_template_path"] = None
-        elif str(prompt_variant).lower() == "slim":
-            kwargs.setdefault(
-                "prompt_template_path",
-                Path(__file__).parent / "templates" / "prompt-slim.md.j2",
-            )
         else:
-            kwargs.setdefault(
-                "prompt_template_path",
-                Path(__file__).parent / "templates" / "prompt.md.j2",
-            )
+            kwargs.setdefault("prompt_template_path", _prompt_template_path(resolved_prompt_variant))
 
         super().__init__(*args, **kwargs)
 
@@ -63,6 +61,7 @@ class BlobfishAgent(BaseInstalledAgent):
         self._default_backend = (backend or "claude").strip().lower()
         if self._default_backend not in {"claude", "codex"}:
             raise ValueError("backend must be one of: claude, codex")
+        self._prompt_variant = requested_prompt_variant
 
         self._default_model_selector = (default_model or "").strip() or None
         self._codex_model = (codex_model or "").strip() or None
@@ -89,11 +88,10 @@ class BlobfishAgent(BaseInstalledAgent):
 
     @property
     def _install_agent_template_path(self) -> Path:
-        templates = Path(__file__).parent / "templates"
         backend, _ = self._resolve_backend_and_model()
         if backend == "codex":
-            return templates / "install-codex.sh.j2"
-        return templates / "install-claude.sh.j2"
+            return TEMPLATES_DIR / "install-codex.sh.j2"
+        return TEMPLATES_DIR / "install-claude.sh.j2"
 
     def to_agent_info(self) -> AgentInfo:
         model_info = None
@@ -196,6 +194,8 @@ class BlobfishAgent(BaseInstalledAgent):
         )
         env["TASK_START_EPOCH"] = str(int(time.time()))
         env["TASK_TIMEOUT_SECS"] = os.environ.get("HARBOR_TASK_TIMEOUT", "1800")
+        prompt_variant = _resolve_prompt_variant(self._prompt_variant, model_name)
+        claude_md = shlex.quote(_project_claude_md(prompt_variant))
 
         setup_cmd = (
             "mkdir -p $CLAUDE_CONFIG_DIR/debug $CLAUDE_CONFIG_DIR/projects/-app "
@@ -204,12 +204,7 @@ class BlobfishAgent(BaseInstalledAgent):
             "if [ -d ~/.claude/skills ]; then "
             "cp -r ~/.claude/skills $CLAUDE_CONFIG_DIR/skills 2>/dev/null || true; "
             "fi && "
-            "printf '"
-            "Keep thinking concise: max 1500 words per thinking block.\\n"
-            "Prefer writing and running code over extended analysis.\\n"
-            "When facing complex problems, break into small steps with tool calls "
-            "rather than one long reasoning chain.\\n"
-            "' > $CLAUDE_CONFIG_DIR/projects/-app/CLAUDE.md && "
+            f"printf %s {claude_md} > $CLAUDE_CONFIG_DIR/projects/-app/CLAUDE.md && "
             "timed() { local s=$(date +%s); timeout ${TIMED_LIMIT:-120} \"$@\"; local rc=$?; "
             "if [ $rc -eq 124 ]; then echo \"[TIMING] KILLED after $(($(date +%s)-s))s\"; "
             "else echo \"[TIMING] $(($(date +%s)-s))s (exit $rc)\"; fi; return $rc; } && "
@@ -357,6 +352,52 @@ def _resolve_agent_name(explicit_name: str | None) -> str:
     return candidate[:39]
 
 
+def _normalize_prompt_variant(prompt_variant: str | None) -> str:
+    value = (prompt_variant or "auto").strip().lower()
+    if not value:
+        value = "auto"
+    aliases = {
+        "minimax": "minimax-m2.5",
+        "minimax-m25": "minimax-m2.5",
+        "minimax_m25": "minimax-m2.5",
+    }
+    value = aliases.get(value, value)
+    if value not in {"auto", "full", "slim", "minimax-m2.5"}:
+        raise ValueError("prompt_variant must be one of: auto, full, slim, minimax-m2.5")
+    return value
+
+
+def _resolve_prompt_variant(prompt_variant: str, model_name: str | None) -> str:
+    if prompt_variant != "auto":
+        return prompt_variant
+    if _is_minimax_m25(model_name):
+        return "minimax-m2.5"
+    return "full"
+
+
+def _is_minimax_m25(model_name: str | None) -> bool:
+    if not model_name:
+        return False
+    low = model_name.lower()
+    return "minimax-m2.5" in low
+
+
+def _prompt_template_path(prompt_variant: str) -> Path:
+    if prompt_variant == "slim":
+        return TEMPLATES_DIR / "prompt-slim.md.j2"
+    if prompt_variant == "minimax-m2.5":
+        return TEMPLATES_DIR / "prompt-minimax-m25.md.j2"
+    return TEMPLATES_DIR / "prompt.md.j2"
+
+
+def _project_claude_md(prompt_variant: str) -> str:
+    if prompt_variant == "minimax-m2.5":
+        path = TEMPLATES_DIR / "claude-project-minimax-m25.md"
+    else:
+        path = TEMPLATES_DIR / "claude-project-default.md"
+    return path.read_text()
+
+
 def _read_oauth_token() -> str | None:
     creds_path = Path.home() / ".claude" / ".credentials.json"
     try:
@@ -439,4 +480,3 @@ def _rewrite_localhost_for_docker(url: str | None) -> str | None:
 
     netloc = parsed.netloc.replace(parsed.hostname, host_gateway, 1)
     return urlunparse(parsed._replace(netloc=netloc))
-

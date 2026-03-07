@@ -11,6 +11,7 @@ venv/
 jobs/
 runs/
 harbor-venv/
+monitor-reports/
 
 # Local env files
 .env
@@ -18,4 +19,3 @@ agents/*/secrets.env
 
 # Internal Docs
 docs/
-
