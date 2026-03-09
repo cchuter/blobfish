@@ -127,10 +127,44 @@ sub denied_edit_path {
     return '';
 }
 
+sub increment_deny_count {
+    my ($file_path) = @_;
+    my $count_file = state_path('mutation_deny_count');
+    my @lines = read_lines($count_file);
+    my %counts;
+    for my $line (@lines) {
+        if ($line =~ /^(\d+)\t(.+)$/) { $counts{$2} = int($1); }
+    }
+    $counts{$file_path} = ($counts{$file_path} // 0) + 1;
+    my $text = join('', map { "$counts{$_}\t$_\n" } keys %counts);
+    write_text($count_file, $text);
+    return $counts{$file_path};
+}
+
+sub get_deny_count {
+    my ($file_path) = @_;
+    for my $line (read_lines(state_path('mutation_deny_count'))) {
+        return int($1) if $line =~ /^(\d+)\t(.+)$/ && $2 eq $file_path;
+    }
+    return 0;
+}
+
+sub increment_nudge_count {
+    my $path = state_path('nudge_count');
+    my $count = read_int($path, 0) + 1;
+    write_text($path, "$count\n");
+    return $count;
+}
+
+sub reset_nudge_count {
+    write_text(state_path('nudge_count'), "0\n");
+}
+
 sub mutated_evidence_reason {
     my ($tool_name, $file_path, $content) = @_;
     return '' unless $tool_name eq 'Write';
     return '' unless defined $file_path && index($file_path, '/app/') == 0;
+    return '' if get_deny_count($file_path) >= 2;
     return '' unless defined $content;
     my @candidates = grep { /[A-Z]/ && /\d/ } ($content =~ /([A-Z0-9]{8,})/g);
     return '' unless @candidates == 1;
@@ -186,9 +220,7 @@ sub phase_message {
     return 'Preserve observed evidence exactly. If you have a plausible answer, write it now.' if $timeout <= 0;
     my $remaining = $timeout - $elapsed;
     my $pct = int(($elapsed * 100) / $timeout);
-    return 'FINAL 120s: switch to the deadline-aware-delivery workflow now. Stop exploring, write the best current valid artifact, run the closest authoritative verification, and ship the best verified result.' if $remaining < 120;
-    return '75%+ elapsed: shift into deadline-aware-delivery. Stop opening new branches, finalize the best current solution, and verify required outputs.' if $pct >= 75;
-    return '50%+ elapsed: reassess progress. If you are not clearly on track, simplify toward the best current result and be ready to use deadline-aware-delivery.' if $pct >= 50;
+    return 'FINAL 120s: STOP exploring. Write the best current valid artifact, run the closest authoritative verification, and ship.' if $remaining < 120;
     return 'If you have a plausible evidence-backed answer, write it now; you can overwrite it later.' unless $output_written;
     return 'Keep work concise and preserve observed evidence exactly.';
 }
@@ -207,6 +239,8 @@ sub salient_evidence_lines {
             next if $line eq '';
             next if length($line) > 120;
             next if $line =~ /^(Elapsed:|Remaining:|=== \/tmp\/run_state\.md ===|# Run state|- Goal:|- Best known result:|- Next step:|Exit code \d+|No matches found)$/;
+            # Skip Claude Code internal metadata (session IDs, paths, config)
+            next if $line =~ /session_id|transcript_path|permission_mode|hook_event|hook_id|claude_code_version|apiKeySource|fast_mode_state|output_style|mcp_servers/;
             next unless $line =~ /(PASSWORD=|[A-Z0-9]{8,}|launchcode|\/(app|logs)\/|\b(pass|fail|score|wins?|matches?|error|timeout|constraint)\b)/i;
             next if $seen{$line}++;
             push @lines, $line;
@@ -251,7 +285,7 @@ sub looks_like_validation {
     return 0 unless $tool_name eq 'Bash';
     return 0 unless defined $command;
     my $lower = lc($command);
-    for my $marker ('/tests/', 'pytest', 'unittest', 'cargo test', 'go test', 'npm test', 'pnpm test', 'yarn test', 'bun test', 'ctest', 'make test', 'verify', 'cat /app/', 'sed -n ', 'grep ') {
+    for my $marker ('/tests/', 'pytest', 'unittest', 'cargo test', 'go test', 'npm test', 'pnpm test', 'yarn test', 'bun test', 'ctest', 'make test', 'verify', 'sed -n ', 'grep ') {
         return 1 if index($lower, $marker) >= 0;
     }
     return 0;
@@ -272,7 +306,6 @@ sub snapshot_measured_artifact {
     write_text($snapshot, defined $content ? $content : '');
     write_text(state_path('measured_path'), "$path\n");
     write_text(state_path('measured_backup'), "$snapshot\n");
-    write_text(state_path('measured_notice'), '');
 }
 
 1;

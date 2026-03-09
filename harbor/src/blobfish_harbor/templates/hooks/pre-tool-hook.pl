@@ -19,7 +19,8 @@ if ($blocked_path ne '') {
 
 my $mutated_reason = mutated_evidence_reason($tool_name, $file_path, $content);
 if ($mutated_reason ne '') {
-    log_line("PreToolUse deny_mutated_evidence tool=$tool_name");
+    my $deny_count = increment_deny_count($file_path);
+    log_line("PreToolUse deny_mutated_evidence tool=$tool_name path=$file_path deny_count=$deny_count");
     emit_permission_decision('deny', $mutated_reason);
     exit 0;
 }
@@ -42,15 +43,8 @@ exit 0 if $command =~ /\bstatus\b/;
 my (undef, $elapsed, $timeout) = current_timing();
 my $remaining = $timeout ? ($timeout - $elapsed) : 0;
 my $phase = 0;
-if ($timeout > 0) {
-    my $pct = int(($elapsed * 100) / $timeout);
-    if ($remaining < 120) {
-        $phase = 3;
-    } elsif ($pct >= 75) {
-        $phase = 2;
-    } elsif ($pct >= 50) {
-        $phase = 1;
-    }
+if ($timeout > 0 && $remaining < 120) {
+    $phase = 3;
 }
 my $last_phase = read_int(state_path('phase'), -1);
 my $consecutive_failures = read_int(state_path('failures'), 0);

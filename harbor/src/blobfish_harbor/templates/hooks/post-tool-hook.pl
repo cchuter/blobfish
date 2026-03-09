@@ -38,7 +38,16 @@ if (@recent_evidence) {
     $msg .= ' Recent evidence: ' . join(' || ', @recent_evidence) . '.';
 }
 if (!$output_written && @recent_evidence >= 2) {
-    $msg .= ' You already have multiple short evidence lines. Before deeper searching, write the simplest evidence-backed candidate or output artifact you can justify from the current observations.';
+    my $nudge = increment_nudge_count();
+    if ($nudge >= 5) {
+        $msg .= ' CRITICAL: You have observed ' . scalar(@recent_evidence) . ' evidence fragments across ' . $nudge . ' tool calls without writing ANY output. STOP EXPLORING. Write the required output artifact NOW with the best combination of your observed evidence. You can always overwrite it later.';
+    } elsif ($nudge >= 3) {
+        $msg .= ' URGENT: ' . $nudge . ' tool calls with evidence but no output written. Write the simplest exact evidence-backed artifact now before searching further.';
+    } else {
+        $msg .= ' You already have multiple short evidence lines. Before deeper searching, write the simplest evidence-backed candidate or output artifact you can justify from the current observations.';
+    }
+} elsif ($output_written) {
+    reset_nudge_count();
 }
 
 log_line("$event tool=$tool_name elapsed=$elapsed timeout=$timeout output_written=$output_written pending_validation=$pending_validation evidence_count=" . scalar(@recent_evidence));
