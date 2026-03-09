@@ -14,6 +14,8 @@ For optimization tasks with explicit hard constraints, keep only candidates that
 Preserve observed evidence exactly; do not delete, insert, or substitute observed content unless the change is directly supported by the data.
 When stochastic tests barely pass thresholds (e.g., winning 39/100 when 33+ is required), the margin is too thin to survive retest variance. Use remaining time budget to widen the margin or try alternative approaches.
 Do not stop early when you have >50% of your time budget remaining. After local tests pass, invest remaining time improving your solution, running the task's own test/verifier scripts (check /tests/ if it exists), and stress-testing edge cases.
+When all attempts produce consistently poor results, question your testing methodology before iterating on solutions. Run `--help` on tools, read task docs, and verify your command flags and evaluation setup are correct.
+Wrap any script or command that might run longer than 60 seconds with `timeout <seconds>` to prevent hanging. A hung command wastes your entire budget with no recovery.
 
 ## Runtime hooks
 
