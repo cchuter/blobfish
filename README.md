@@ -43,7 +43,8 @@ Open starter agent framework for Terminal-Bench.
 4. Install Harbor and the Blobfish adapter:
 
 ```bash
-uv tool install harbor-bench
+brew install uv
+uv tool install terminal-bench
 uv pip install --python ~/.local/share/uv/tools/harbor/bin/python -e harbor
 ```
 
