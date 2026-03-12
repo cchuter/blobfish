@@ -1,3 +1,3 @@
-from .agent import BlobfishAgent, CchuterAgent
+from .agent import BlobfishAgent, BlobfishSimpleAgent, CchuterAgent
 
-__all__ = ["BlobfishAgent", "CchuterAgent"]
+__all__ = ["BlobfishAgent", "BlobfishSimpleAgent", "CchuterAgent"]

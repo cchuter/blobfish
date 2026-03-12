@@ -41,6 +41,7 @@ class BlobfishAgent(BaseInstalledAgent):
         max_thinking_tokens: int | None = None,
         use_prompt: bool = True,
         prompt_variant: str = "auto",
+        claude_runtime_profile: str = "blobfish",
         *args,
         **kwargs,
     ):
@@ -68,6 +69,7 @@ class BlobfishAgent(BaseInstalledAgent):
         self._codex_model = (codex_model or "").strip() or None
         self._reasoning_effort = reasoning_effort
         self._max_thinking_tokens = max_thinking_tokens
+        self._claude_runtime_profile = _normalize_claude_runtime_profile(claude_runtime_profile)
 
         self._routing: dict[str, dict] = {}
         if routing_table:
@@ -201,589 +203,22 @@ class BlobfishAgent(BaseInstalledAgent):
         env["PATH"] = f"/tmp/blobfish-bin:{existing_path}" if existing_path else "/tmp/blobfish-bin"
         prompt_variant = _resolve_prompt_variant(self._prompt_variant, model_name)
         claude_md_text = _project_claude_md(prompt_variant)
-        claude_md = shlex.quote(claude_md_text)
-
-        _legacy_setup_cmd = (
-            "mkdir -p $CLAUDE_CONFIG_DIR/debug $CLAUDE_CONFIG_DIR/projects/-app "
-            "$CLAUDE_CONFIG_DIR/shell-snapshots $CLAUDE_CONFIG_DIR/statsig "
-            "$CLAUDE_CONFIG_DIR/todos /tmp/blobfish-bin && "
-            "if [ -d ~/.claude/skills ]; then "
-            "cp -r ~/.claude/skills $CLAUDE_CONFIG_DIR/skills 2>/dev/null || true; "
-            "fi && "
-            f"printf %s {claude_md} > $CLAUDE_CONFIG_DIR/projects/-app/CLAUDE.md && "
-            "cat > /tmp/blobfish-bin/timed <<'EOF'\n"
-            "#!/bin/sh\n"
-            "s=$(date +%s)\n"
-            "timeout \"${TIMED_LIMIT:-120}\" \"$@\"\n"
-            "rc=$?\n"
-            "if [ \"$rc\" -eq 124 ]; then\n"
-            "  echo \"[TIMING] KILLED after $(($(date +%s)-s))s\"\n"
-            "else\n"
-            "  echo \"[TIMING] $(($(date +%s)-s))s (exit $rc)\"\n"
-            "fi\n"
-            "exit \"$rc\"\n"
-            "EOF\n"
-            "chmod +x /tmp/blobfish-bin/timed && "
-            "cat > /tmp/run_state.md <<'EOF'\n"
-            "# Run state\n"
-            "- Goal:\n"
-            "- Best known result:\n"
-            "- Next step:\n"
-            "EOF\n"
-            "cat > /tmp/blobfish-bin/status <<'EOF'\n"
-            "#!/bin/sh\n"
-            "now=$(date +%s)\n"
-            "start=${TASK_START_EPOCH:-$now}\n"
-            "timeout=${TASK_TIMEOUT_SECS:-unknown}\n"
-            "elapsed=$((now-start))\n"
-            "echo \"Elapsed: ${elapsed}s\"\n"
-            "if [ \"$timeout\" != \"unknown\" ]; then\n"
-            "  remaining=$((timeout-elapsed))\n"
-            "  echo \"Remaining: ${remaining}s of ${timeout}s\"\n"
-            "fi\n"
-            "if [ -f /tmp/run_state.md ]; then\n"
-            "  echo \"=== /tmp/run_state.md ===\"\n"
-            "  cat /tmp/run_state.md\n"
-            "fi\n"
-            "EOF\n"
-            "chmod +x /tmp/blobfish-bin/status && "
-            "cat > /tmp/blobfish-bin/session-start-hook <<'EOF'\n"
-            "#!/usr/bin/perl\n"
-            "use strict;\n"
-            "use warnings;\n"
-            "use JSON::PP qw(encode_json);\n"
-            "use File::Path qw(make_path);\n"
-            "\n"
-            "my $hook_log = '/logs/agent/hooks.log';\n"
-            "my $timeout = $ENV{TASK_TIMEOUT_SECS} // 'unknown';\n"
-            "my $msg = \"Runtime control: actual task timeout is ${timeout}s. Hook budget reminders are authoritative. Preserve observed evidence exactly; do not mutate observed strings to satisfy heuristics. If you have a plausible evidence-backed answer, write the required output artifact immediately; you can overwrite it later.\";\n"
-            "make_path('/logs/agent');\n"
-            "open my $fh, '>>', $hook_log;\n"
-            "print {$fh} \"SessionStart timeout=$timeout\\n\";\n"
-            "close $fh;\n"
-            "print encode_json({ hookSpecificOutput => { hookEventName => 'SessionStart', additionalContext => $msg } });\n"
-            "EOF\n"
-            "chmod +x /tmp/blobfish-bin/session-start-hook && "
-            "mkdir -p /tmp/blobfish-hook && "
-            "cat > /tmp/blobfish-bin/pre-tool-hook <<'EOF'\n"
-            "#!/usr/bin/perl\n"
-            "use strict;\n"
-            "use warnings;\n"
-            "use JSON::PP qw(decode_json encode_json);\n"
-            "use File::Path qw(make_path);\n"
-            "\n"
-            "my $hook_log = '/logs/agent/hooks.log';\n"
-            "my $state_dir = '/tmp/blobfish-hook';\n"
-            "my $phase_file = \"$state_dir/phase\";\n"
-            "my $fail_file = \"$state_dir/failures\";\n"
-            "my $first_file = \"$state_dir/first_bash\";\n"
-            "my $evidence_file = \"$state_dir/recent_evidence\";\n"
-            "my $measured_path_file = \"$state_dir/measured_path\";\n"
-            "my $measured_backup_file = \"$state_dir/measured_backup\";\n"
-            "my $measured_notice_file = \"$state_dir/measured_notice\";\n"
-            "\n"
-            "sub read_int {\n"
-            "    my ($path, $default) = @_;\n"
-            "    $default //= 0;\n"
-            "    return $default unless -f $path;\n"
-            "    open my $fh, '<', $path or return $default;\n"
-            "    my $text = <$fh>;\n"
-            "    close $fh;\n"
-            "    return ($text // '') =~ /(-?\\d+)/ ? int($1) : $default;\n"
-            "}\n"
-            "\n"
-            "sub write_text {\n"
-            "    my ($path, $text) = @_;\n"
-            "    open my $fh, '>', $path or die \"write $path: $!\";\n"
-            "    print {$fh} $text;\n"
-            "    close $fh;\n"
-            "}\n"
-            "\n"
-            "sub read_lines {\n"
-            "    my ($path) = @_;\n"
-            "    return () unless -f $path;\n"
-            "    open my $fh, '<', $path or return ();\n"
-            "    my @lines = <$fh>;\n"
-            "    close $fh;\n"
-            "    chomp @lines;\n"
-            "    return grep { defined $_ && $_ ne '' } @lines;\n"
-            "}\n"
-            "\n"
-            "sub strong_tokens {\n"
-            "    my (@lines) = @_;\n"
-            "    my %seen;\n"
-            "    my @tokens;\n"
-            "    for my $line (@lines) {\n"
-            "        while ($line =~ /([A-Z0-9]{8,})/g) {\n"
-            "            my $token = $1;\n"
-            "            next unless $token =~ /[A-Z]/ && $token =~ /\\d/;\n"
-            "            next if $seen{$token}++;\n"
-            "            push @tokens, $token;\n"
-            "            return @tokens if @tokens >= 4;\n"
-            "        }\n"
-            "    }\n"
-            "    return @tokens;\n"
-            "}\n"
-            "\n"
-            "sub denied_edit_path {\n"
-            "    my ($tool_name, $tool_input) = @_;\n"
-            "    return '' unless $tool_name =~ /^(Write|Edit|MultiEdit)$/;\n"
-            "    my $path = $tool_input->{file_path};\n"
-            "    return '' unless defined $path;\n"
-            "    for my $part ('/tests/', '/verifier/', '/.claude/', '/CLAUDE.md') {\n"
-            "        return $path if index($path, $part) >= 0;\n"
-            "    }\n"
-            "    return '';\n"
-            "}\n"
-            "\n"
-            "sub mutated_evidence_reason {\n"
-            "    my ($tool_name, $tool_input) = @_;\n"
-            "    return '' unless $tool_name eq 'Write';\n"
-            "    my $path = $tool_input->{file_path} // '';\n"
-            "    return '' unless index($path, '/app/') == 0;\n"
-            "    my $content = $tool_input->{content} // '';\n"
-            "    my @candidates = grep { /[A-Z]/ && /\\d/ } ($content =~ /([A-Z0-9]{8,})/g);\n"
-            "    return '' unless @candidates == 1;\n"
-            "    my $candidate = $candidates[0];\n"
-            "    my @tokens = grep { length($_) >= 10 } strong_tokens(read_lines($evidence_file));\n"
-            "    return '' unless @tokens >= 2;\n"
-            "    my @missing = grep { index($candidate, $_) < 0 } @tokens;\n"
-            "    return '' unless @missing;\n"
-            "    my $token_summary = join(' || ', @tokens[0 .. (@tokens > 2 ? 2 : $#tokens)]);\n"
-            "    return \"The content you are writing mutates or drops exact observed token fragments. Preserve observed evidence exactly before writing. Recent exact tokens: $token_summary.\";\n"
-            "}\n"
-            "\n"
-            "sub measured_overwrite_reason {\n"
-            "    my ($tool_name, $tool_input) = @_;\n"
-            "    return '' unless $tool_name eq 'Write';\n"
-            "    my $path = $tool_input->{file_path} // '';\n"
-            "    return '' unless index($path, '/app/') == 0;\n"
-            "    my @measured_path = read_lines($measured_path_file);\n"
-            "    return '' unless @measured_path && $measured_path[0] eq $path;\n"
-            "    my @notice = read_lines($measured_notice_file);\n"
-            "    return '' if @notice && $notice[0] eq $path;\n"
-            "    write_text($measured_notice_file, \"$path\\n\");\n"
-            "    my @backup = read_lines($measured_backup_file);\n"
-            "    my $backup = @backup ? $backup[0] : 'the measured artifact snapshot';\n"
-            "    return \"You are overwriting a previously measured /app artifact at $path. Preserve the measured version before replacement. A snapshot is available at $backup. If the new variant regresses, restore the measured version instead of throwing it away.\";\n"
-            "}\n"
-            "\n"
-            "my $raw = do { local $/; <STDIN> };\n"
-            "my $payload = length($raw) ? decode_json($raw) : {};\n"
-            "my $tool_name = $payload->{tool_name} // '';\n"
-            "my $tool_input = ref($payload->{tool_input}) eq 'HASH' ? $payload->{tool_input} : {};\n"
-            "my $blocked_path = denied_edit_path($tool_name, $tool_input);\n"
-            "if ($blocked_path ne '') {\n"
-            "    make_path('/logs/agent');\n"
-            "    open my $fh, '>>', $hook_log;\n"
-            "    print {$fh} \"PreToolUse deny tool=$tool_name path=$blocked_path\\n\";\n"
-            "    close $fh;\n"
-            "    print encode_json({ hookSpecificOutput => { hookEventName => 'PreToolUse', permissionDecision => 'deny', permissionDecisionReason => 'Do not modify tests, verifiers, or Claude settings unless the task explicitly requires it.' } });\n"
-            "    exit 0;\n"
-            "}\n"
-            "my $mutated_reason = mutated_evidence_reason($tool_name, $tool_input);\n"
-            "if ($mutated_reason ne '') {\n"
-            "    make_path('/logs/agent');\n"
-            "    open my $fh, '>>', $hook_log;\n"
-            "    print {$fh} \"PreToolUse deny_mutated_evidence tool=$tool_name\\n\";\n"
-            "    close $fh;\n"
-            "    print encode_json({ hookSpecificOutput => { hookEventName => 'PreToolUse', permissionDecision => 'deny', permissionDecisionReason => $mutated_reason } });\n"
-            "    exit 0;\n"
-            "}\n"
-            "my $measured_reason = measured_overwrite_reason($tool_name, $tool_input);\n"
-            "if ($measured_reason ne '') {\n"
-            "    make_path('/logs/agent');\n"
-            "    open my $fh, '>>', $hook_log;\n"
-            "    print {$fh} \"PreToolUse deny_measured_overwrite tool=$tool_name\\n\";\n"
-            "    close $fh;\n"
-            "    print encode_json({ hookSpecificOutput => { hookEventName => 'PreToolUse', permissionDecision => 'deny', permissionDecisionReason => $measured_reason } });\n"
-            "    exit 0;\n"
-            "}\n"
-            "exit 0 unless $tool_name eq 'Bash';\n"
-            "my $command = $tool_input->{command} // '';\n"
-            "exit 0 if $command =~ /\\bstatus\\b/;\n"
-            "my $now = time;\n"
-            "my $start = int($ENV{TASK_START_EPOCH} // $now);\n"
-            "my $timeout = int($ENV{TASK_TIMEOUT_SECS} // 0);\n"
-            "my $elapsed = $now - $start;\n"
-            "my $remaining = $timeout ? ($timeout - $elapsed) : 0;\n"
-            "my $phase = 0;\n"
-            "if ($timeout > 0) {\n"
-            "    my $pct = int(($elapsed * 100) / $timeout);\n"
-            "    if ($remaining < 120) {\n"
-            "        $phase = 3;\n"
-            "    } elsif ($pct >= 75) {\n"
-            "        $phase = 2;\n"
-            "    } elsif ($pct >= 50) {\n"
-            "        $phase = 1;\n"
-            "    }\n"
-            "}\n"
-            "my $last_phase = read_int($phase_file, -1);\n"
-            "my $consecutive_failures = read_int($fail_file, 0);\n"
-            "my $should_inject = (!-f $first_file) || ($phase > $last_phase) || ($consecutive_failures >= 2);\n"
-            "exit 0 unless $should_inject;\n"
-            "write_text($first_file, \"1\\n\");\n"
-            "write_text($phase_file, \"$phase\\n\");\n"
-            "write_text($fail_file, \"0\\n\") if $consecutive_failures >= 2;\n"
-            "my $new_command = \"status; $command\";\n"
-            "make_path('/logs/agent');\n"
-            "open my $fh, '>>', $hook_log;\n"
-            "print {$fh} \"PreToolUse inject_status phase=$phase elapsed=$elapsed remaining=$remaining failures=$consecutive_failures\\n\";\n"
-            "close $fh;\n"
-            "print encode_json({ hookSpecificOutput => { hookEventName => 'PreToolUse', permissionDecision => 'allow', permissionDecisionReason => 'Injected status checkpoint before Bash command', updatedInput => { command => $new_command }, additionalContext => 'Use the status output as the authoritative budget/current-state snapshot for your next decision.' } });\n"
-            "EOF\n"
-            "chmod +x /tmp/blobfish-bin/pre-tool-hook && "
-            "cat > /tmp/blobfish-bin/post-tool-hook <<'EOF'\n"
-            "#!/usr/bin/perl\n"
-            "use strict;\n"
-            "use warnings;\n"
-            "use JSON::PP qw(decode_json encode_json);\n"
-            "use File::Path qw(make_path);\n"
-            "\n"
-            "my $hook_log = '/logs/agent/hooks.log';\n"
-            "my $state_dir = '/tmp/blobfish-hook';\n"
-            "my $fail_file = \"$state_dir/failures\";\n"
-            "my $output_file = \"$state_dir/output_written\";\n"
-            "my $pending_validation_file = \"$state_dir/pending_validation\";\n"
-            "my $stop_block_file = \"$state_dir/stop_blocked\";\n"
-            "my $evidence_file = \"$state_dir/recent_evidence\";\n"
-            "my $measured_path_file = \"$state_dir/measured_path\";\n"
-            "my $measured_backup_file = \"$state_dir/measured_backup\";\n"
-            "my $measured_notice_file = \"$state_dir/measured_notice\";\n"
-            "my $measured_snapshot = \"$state_dir/measured_output.snapshot\";\n"
-            "my @validation_markers = ('/tests/', 'pytest', 'unittest', 'cargo test', 'go test', 'npm test', 'pnpm test', 'yarn test', 'bun test', 'ctest', 'make test', 'verify', 'cat /app/', 'sed -n ', 'grep ');\n"
-            "\n"
-            "sub read_int {\n"
-            "    my ($path, $default) = @_;\n"
-            "    $default //= 0;\n"
-            "    return $default unless -f $path;\n"
-            "    open my $fh, '<', $path or return $default;\n"
-            "    my $text = <$fh>;\n"
-            "    close $fh;\n"
-            "    return ($text // '') =~ /(-?\\d+)/ ? int($1) : $default;\n"
-            "}\n"
-            "\n"
-            "sub write_text {\n"
-            "    my ($path, $text) = @_;\n"
-            "    open my $fh, '>', $path or die \"write $path: $!\";\n"
-            "    print {$fh} $text;\n"
-            "    close $fh;\n"
-            "}\n"
-            "\n"
-            "sub read_lines {\n"
-            "    my ($path) = @_;\n"
-            "    return () unless -f $path;\n"
-            "    open my $fh, '<', $path or return ();\n"
-            "    my @lines = <$fh>;\n"
-            "    close $fh;\n"
-            "    chomp @lines;\n"
-            "    return grep { defined $_ && $_ ne '' } @lines;\n"
-            "}\n"
-            "\n"
-            "sub mark_pending_validation {\n"
-            "    write_text($pending_validation_file, \"1\\n\");\n"
-            "    write_text($stop_block_file, \"0\\n\");\n"
-            "}\n"
-            "\n"
-            "sub clear_pending_validation {\n"
-            "    write_text($pending_validation_file, \"0\\n\");\n"
-            "    write_text($stop_block_file, \"0\\n\");\n"
-            "}\n"
-            "\n"
-            "sub snapshot_measured_artifact {\n"
-            "    my ($tool_name) = @_;\n"
-            "    return unless $tool_name eq 'Bash';\n"
-            "    return unless -f $output_file;\n"
-            "    my @paths = read_lines($output_file);\n"
-            "    return unless @paths;\n"
-            "    my $path = $paths[0];\n"
-            "    return unless defined $path && $path ne '' && -f $path;\n"
-            "    open my $in, '<', $path or return;\n"
-            "    local $/;\n"
-            "    my $content = <$in>;\n"
-            "    close $in;\n"
-            "    write_text($measured_snapshot, $content // '');\n"
-            "    write_text($measured_path_file, \"$path\\n\");\n"
-            "    write_text($measured_backup_file, \"$measured_snapshot\\n\");\n"
-            "    write_text($measured_notice_file, \"\");\n"
-            "}\n"
-            "\n"
-            "sub has_pending_validation {\n"
-            "    return read_int($pending_validation_file, 0) > 0;\n"
-            "}\n"
-            "\n"
-            "sub looks_like_validation {\n"
-            "    my ($tool_name, $tool_input) = @_;\n"
-            "    if ($tool_name eq 'Read') {\n"
-            "        my $file_path = $tool_input->{file_path} // '';\n"
-            "        return index($file_path, '/app/') == 0;\n"
-            "    }\n"
-            "    return 0 unless $tool_name eq 'Bash';\n"
-            "    my $command = lc($tool_input->{command} // '');\n"
-            "    for my $marker (@validation_markers) {\n"
-            "        return 1 if index($command, $marker) >= 0;\n"
-            "    }\n"
-            "    return 0;\n"
-            "}\n"
-            "\n"
-            "sub phase_message {\n"
-            "    my ($elapsed, $timeout, $output_written) = @_;\n"
-            "    return 'Preserve observed evidence exactly. If you have a plausible answer, write it now.' if $timeout <= 0;\n"
-            "    my $remaining = $timeout - $elapsed;\n"
-            "    my $pct = int(($elapsed * 100) / $timeout);\n"
-            "    return 'FINAL: <120s left. Write your best answer now and verify.' if $remaining < 120;\n"
-            "    return '75%+ elapsed. Finalize your best solution and write required outputs before time runs out.' if $pct >= 75;\n"
-            "    return '50%+ elapsed. Simplify if not on track. Preserve exact evidence and write your best plausible answer early.' if $pct >= 50;\n"
-            "    return 'If you have a plausible evidence-backed answer, write it now; you can overwrite it later.' unless $output_written;\n"
-            "    return 'Keep work concise and preserve observed evidence exactly.';\n"
-            "}\n"
-            "\n"
-            "sub collect_strings {\n"
-            "    my ($node, $out) = @_;\n"
-            "    return unless defined $node;\n"
-            "    if (!ref $node) {\n"
-            "        push @$out, $node if $node ne '';\n"
-            "        return;\n"
-            "    }\n"
-            "    if (ref($node) eq 'ARRAY') {\n"
-            "        collect_strings($_, $out) for @$node;\n"
-            "        return;\n"
-            "    }\n"
-            "    if (ref($node) eq 'HASH') {\n"
-            "        collect_strings($node->{$_}, $out) for keys %$node;\n"
-            "    }\n"
-            "}\n"
-            "\n"
-            "sub salient_evidence_lines {\n"
-            "    my ($tool_response) = @_;\n"
-            "    my @strings;\n"
-            "    collect_strings($tool_response, \\@strings);\n"
-            "    my %seen;\n"
-            "    my @lines;\n"
-            "    STRING: for my $text (@strings) {\n"
-            "        next if length($text) > 6000;\n"
-            "        for my $line (split /\\n/, $text) {\n"
-            "            $line =~ s/^\\s+//;\n"
-            "            $line =~ s/\\s+$//;\n"
-            "            next if $line eq '';\n"
-            "            next if length($line) > 120;\n"
-            "            next if $line =~ /^(Elapsed:|Remaining:|=== \\/tmp\\/run_state\\.md ===|# Run state|- Goal:|- Best known result:|- Next step:|Exit code \\d+|No matches found)$/;\n"
-            "            next unless $line =~ /(PASSWORD=|[A-Z0-9]{8,}|launchcode|\\/(app|logs)\\/|\\b(pass|fail|score|wins?|matches?|error|timeout|constraint)\\b)/i;\n"
-            "            next if $seen{$line}++;\n"
-            "            push @lines, $line;\n"
-            "            last STRING if @lines >= 4;\n"
-            "        }\n"
-            "    }\n"
-            "    return @lines;\n"
-            "}\n"
-            "\n"
-            "sub update_evidence {\n"
-            "    my ($tool_response) = @_;\n"
-            "    my @new_lines = salient_evidence_lines($tool_response);\n"
-            "    return () unless @new_lines;\n"
-            "    my @existing = read_lines($evidence_file);\n"
-            "    my %seen;\n"
-            "    my @merged = grep { !$seen{$_}++ } (@existing, @new_lines);\n"
-            "    @merged = @merged[-4 .. -1] if @merged > 4;\n"
-            "    write_text($evidence_file, join(\"\\n\", @merged) . \"\\n\");\n"
-            "    return @merged;\n"
-            "}\n"
-            "\n"
-            "my $raw = do { local $/; <STDIN> };\n"
-            "my $payload = length($raw) ? decode_json($raw) : {};\n"
-            "my $event = $payload->{hook_event_name} // 'PostToolUse';\n"
-            "my $tool_name = $payload->{tool_name} // '';\n"
-            "my $tool_input = ref($payload->{tool_input}) eq 'HASH' ? $payload->{tool_input} : {};\n"
-            "my $tool_response = $payload->{tool_response};\n"
-            "my $now = time;\n"
-            "my $start = int($ENV{TASK_START_EPOCH} // $now);\n"
-            "my $timeout = int($ENV{TASK_TIMEOUT_SECS} // 0);\n"
-            "my $elapsed = $now - $start;\n"
-            "make_path('/logs/agent');\n"
-            "if ($event eq 'PostToolUseFailure') {\n"
-            "    my $failures = read_int($fail_file, 0) + 1;\n"
-            "    write_text($fail_file, \"$failures\\n\");\n"
-            "    my $msg = 'Tool failed. Do not repeat the same failing path more than twice; simplify, pivot, or write the best evidence-backed answer you have.';\n"
-            "    open my $fh, '>>', $hook_log;\n"
-            "    print {$fh} \"$event tool=$tool_name failures=$failures elapsed=$elapsed timeout=$timeout\\n\";\n"
-            "    close $fh;\n"
-            "    print encode_json({ hookSpecificOutput => { hookEventName => $event, additionalContext => $msg } });\n"
-            "    exit 0;\n"
-            "}\n"
-            "write_text($fail_file, \"0\\n\");\n"
-            "if ($tool_name =~ /^(Write|Edit|MultiEdit)$/) {\n"
-            "    my $file_path = $tool_input->{file_path} // '';\n"
-            "    if (index($file_path, '/app/') == 0) {\n"
-            "        write_text($output_file, \"$file_path\\n\");\n"
-            "        mark_pending_validation();\n"
-            "    }\n"
-            "}\n"
-            "clear_pending_validation() if looks_like_validation($tool_name, $tool_input);\n"
-            "snapshot_measured_artifact($tool_name);\n"
-            "my @recent_evidence = update_evidence($tool_response);\n"
-            "my $output_written = -f $output_file ? 1 : 0;\n"
-            "my $pending_validation = has_pending_validation() ? 1 : 0;\n"
-            "my $msg = \"[${elapsed}s / ${timeout}s] \" . phase_message($elapsed, $timeout, $output_written);\n"
-            "if ($pending_validation) {\n"
-            "    $msg .= ' You have unvalidated /app changes; validate the final artifact or test results before stopping.';\n"
-            "}\n"
-            "if (@recent_evidence) {\n"
-            "    $msg .= ' Recent evidence: ' . join(' || ', @recent_evidence) . '.';\n"
-            "}\n"
-            "if (!$output_written && @recent_evidence >= 2) {\n"
-            "    $msg .= ' You have multiple short evidence lines already. Before deeper searching, form the simplest exact candidate from the observed lines and write it now. Prefer exact concatenation or exact observed overlap only; do not alter observed characters to satisfy heuristics.';\n"
-            "}\n"
-            "open my $fh, '>>', $hook_log;\n"
-            "print {$fh} \"$event tool=$tool_name elapsed=$elapsed timeout=$timeout output_written=$output_written pending_validation=$pending_validation evidence_count=\" . scalar(@recent_evidence) . \"\\n\";\n"
-            "close $fh;\n"
-            "print encode_json({ hookSpecificOutput => { hookEventName => $event, additionalContext => $msg } });\n"
-            "EOF\n"
-            "chmod +x /tmp/blobfish-bin/post-tool-hook && "
-            "cat > /tmp/blobfish-bin/stop-hook <<'EOF'\n"
-            "#!/usr/bin/perl\n"
-            "use strict;\n"
-            "use warnings;\n"
-            "use JSON::PP qw(encode_json);\n"
-            "use File::Path qw(make_path);\n"
-            "\n"
-            "my $hook_log = '/logs/agent/hooks.log';\n"
-            "my $state_dir = '/tmp/blobfish-hook';\n"
-            "my $pending_validation_file = \"$state_dir/pending_validation\";\n"
-            "my $stop_block_file = \"$state_dir/stop_blocked\";\n"
-            "my $evidence_file = \"$state_dir/recent_evidence\";\n"
-            "\n"
-            "sub read_int {\n"
-            "    my ($path, $default) = @_;\n"
-            "    $default //= 0;\n"
-            "    return $default unless -f $path;\n"
-            "    open my $fh, '<', $path or return $default;\n"
-            "    my $text = <$fh>;\n"
-            "    close $fh;\n"
-            "    return ($text // '') =~ /(-?\\d+)/ ? int($1) : $default;\n"
-            "}\n"
-            "\n"
-            "sub write_text {\n"
-            "    my ($path, $text) = @_;\n"
-            "    open my $fh, '>', $path or die \"write $path: $!\";\n"
-            "    print {$fh} $text;\n"
-            "    close $fh;\n"
-            "}\n"
-            "\n"
-            "sub read_lines {\n"
-            "    my ($path) = @_;\n"
-            "    return () unless -f $path;\n"
-            "    open my $fh, '<', $path or return ();\n"
-            "    my @lines = <$fh>;\n"
-            "    close $fh;\n"
-            "    chomp @lines;\n"
-            "    return grep { defined $_ && $_ ne '' } @lines;\n"
-            "}\n"
-            "\n"
-            "my $pending_validation = read_int($pending_validation_file, 0) > 0;\n"
-            "my $stop_blocks = read_int($stop_block_file, 0);\n"
-            "my @evidence = read_lines($evidence_file);\n"
-            "make_path('/logs/agent');\n"
-            "if ($pending_validation && $stop_blocks < 1) {\n"
-            "    write_text($stop_block_file, \"1\\n\");\n"
-            "    my $reason = 'You changed /app files since your last validation. Before stopping, run a direct validation step such as reading the final artifact or running the authoritative task test path. Preserve observed evidence exactly and do not drop characters from observed strings to satisfy heuristics.';\n"
-            "    $reason .= ' Recent evidence: ' . join(' || ', @evidence) . '.' if @evidence;\n"
-            "    open my $fh, '>>', $hook_log;\n"
-            "    print {$fh} \"Stop block pending_validation=1\\n\";\n"
-            "    close $fh;\n"
-            "    print encode_json({ decision => 'block', reason => $reason });\n"
-            "    exit 0;\n"
-            "}\n"
-            "open my $fh, '>>', $hook_log;\n"
-            "print {$fh} \"Stop allow pending_validation=\" . ($pending_validation ? 1 : 0) . \" stop_blocks=$stop_blocks\\n\";\n"
-            "close $fh;\n"
-            "EOF\n"
-            "chmod +x /tmp/blobfish-bin/stop-hook && "
-            "cat > $CLAUDE_CONFIG_DIR/settings.json <<'EOF'\n"
-            '{\n'
-            '  "hooks": {\n'
-            '    "SessionStart": [\n'
-            '      {\n'
-            '        "matcher": "startup|resume|clear|compact",\n'
-            '        "hooks": [\n'
-            '          {\n'
-            '            "type": "command",\n'
-            '            "command": "/tmp/blobfish-bin/session-start-hook"\n'
-            '          }\n'
-            '        ]\n'
-            '      }\n'
-            '    ],\n'
-            '    "PreToolUse": [\n'
-            '      {\n'
-            '        "matcher": "",\n'
-            '        "hooks": [\n'
-            '          {\n'
-            '            "type": "command",\n'
-            '            "command": "/tmp/blobfish-bin/pre-tool-hook"\n'
-            '          }\n'
-            '        ]\n'
-            '      }\n'
-            '    ],\n'
-            '    "PostToolUse": [\n'
-            '      {\n'
-            '        "matcher": "",\n'
-            '        "hooks": [\n'
-            '          {\n'
-            '            "type": "command",\n'
-            '            "command": "/tmp/blobfish-bin/post-tool-hook"\n'
-            '          }\n'
-            '        ]\n'
-            '      }\n'
-            '    ],\n'
-            '    "PostToolUseFailure": [\n'
-            '      {\n'
-            '        "matcher": "",\n'
-            '        "hooks": [\n'
-            '          {\n'
-            '            "type": "command",\n'
-            '            "command": "/tmp/blobfish-bin/post-tool-hook"\n'
-            '          }\n'
-            '        ]\n'
-            '      }\n'
-            '    ],\n'
-            '    "Stop": [\n'
-            '      {\n'
-            '        "matcher": "",\n'
-            '        "hooks": [\n'
-            '          {\n'
-            '            "type": "command",\n'
-            '            "command": "/tmp/blobfish-bin/stop-hook"\n'
-            '          }\n'
-            '        ]\n'
-            '      }\n'
-            '    ]\n'
-            '  }\n'
-            '}\n'
-            "EOF\n"
-            "{ echo '=== SYSTEM ===' && uname -a && "
-            "cat /etc/os-release 2>/dev/null | head -3; "
-            "echo '=== TOOLS ===' && "
-            "command -v python3 python gcc g++ make cmake node npm cargo rustc go java javac timed status; "
-            "echo '=== /app ===' && ls /app; "
-            "git -C /app log --oneline -3 2>/dev/null; "
-            "echo '=== orient.txt written ==='; "
-            "echo '=== STATUS ==='; status; } > /tmp/orient.txt 2>&1"
-        )
-
-        # The template-backed setup below is the only live Claude hook path.
-        # Keep hooks portable: shell + module-free Perl only.
-        setup_cmd = _claude_setup_cmd(
-            claude_md=claude_md_text,
-            session_start_hook=_hook_template_text("session-start-hook.sh"),
-            hook_common_pl=_hook_template_text("hook_common.pl"),
-            pre_tool_hook=_hook_template_text("pre-tool-hook.pl"),
-            post_tool_hook=_hook_template_text("post-tool-hook.pl"),
-            stop_hook=_hook_template_text("stop-hook.pl"),
-            task_completed_hook=_hook_template_text("task-completed-hook.pl"),
-            constraint_rule=_project_rule_text("constraint-first-debugging.md"),
-            constraint_skill=_project_skill_text("constraint-first-debugging/SKILL.md"),
-            deadline_rule=_project_rule_text("deadline-aware-delivery.md"),
-            deadline_skill=_project_skill_text("deadline-aware-delivery/SKILL.md"),
-        )
+        if self._claude_runtime_profile == "simple":
+            setup_cmd = _claude_simple_setup_cmd(claude_md=claude_md_text)
+        else:
+            setup_cmd = _claude_setup_cmd(
+                claude_md=claude_md_text,
+                session_start_hook=_hook_template_text("session-start-hook.sh"),
+                hook_common_pl=_hook_template_text("hook_common.pl"),
+                pre_tool_hook=_hook_template_text("pre-tool-hook.pl"),
+                post_tool_hook=_hook_template_text("post-tool-hook.pl"),
+                stop_hook=_hook_template_text("stop-hook.pl"),
+                task_completed_hook=_hook_template_text("task-completed-hook.pl"),
+                constraint_rule=_project_rule_text("constraint-first-debugging.md"),
+                constraint_skill=_project_skill_text("constraint-first-debugging/SKILL.md"),
+                deadline_rule=_project_rule_text("deadline-aware-delivery.md"),
+                deadline_skill=_project_skill_text("deadline-aware-delivery/SKILL.md"),
+            )
 
         run_cmd = (
             "export PATH=\"/tmp/blobfish-bin:$HOME/.local/bin:$PATH\" && "
@@ -904,6 +339,19 @@ class CchuterAgent(BlobfishAgent):
         super().__init__(*args, **kwargs)
 
 
+class BlobfishSimpleAgent(BlobfishAgent):
+    """Minimal Claude agent intended to stay close to the baseline behavior."""
+
+    @staticmethod
+    def name() -> str:
+        return "blobfish-simple"
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("prompt_variant", "full")
+        kwargs.setdefault("claude_runtime_profile", "simple")
+        super().__init__(*args, **kwargs)
+
+
 def _resolve_agent_name(explicit_name: str | None) -> str:
     candidate = (
         explicit_name
@@ -918,6 +366,13 @@ def _resolve_agent_name(explicit_name: str | None) -> str:
     if not candidate:
         return "blobfish"
     return candidate[:39]
+
+
+def _normalize_claude_runtime_profile(value: str | None) -> str:
+    profile = (value or "blobfish").strip().lower()
+    if profile not in {"blobfish", "simple"}:
+        raise ValueError("claude_runtime_profile must be one of: blobfish, simple")
+    return profile
 
 
 def _normalize_prompt_variant(prompt_variant: str | None) -> str:
@@ -1020,6 +475,35 @@ def _claude_settings_json() -> str:
         }
     }
     return json.dumps(settings, indent=2)
+
+
+def _claude_simple_setup_cmd(*, claude_md: str) -> str:
+    timed_script = """#!/bin/sh
+s=$(date +%s)
+timeout "${TIMED_LIMIT:-120}" "$@"
+rc=$?
+if [ "$rc" -eq 124 ]; then
+  echo "[TIMING] KILLED after $(($(date +%s)-s))s"
+else
+  echo "[TIMING] $(($(date +%s)-s))s (exit $rc)"
+fi
+exit "$rc"
+"""
+    return (
+        "mkdir -p $CLAUDE_CONFIG_DIR/debug $CLAUDE_CONFIG_DIR/projects/-app "
+        "$CLAUDE_CONFIG_DIR/shell-snapshots $CLAUDE_CONFIG_DIR/statsig "
+        "$CLAUDE_CONFIG_DIR/todos /tmp/blobfish-bin && "
+        f"printf %s {shlex.quote(claude_md)} > $CLAUDE_CONFIG_DIR/projects/-app/CLAUDE.md && "
+        f"printf %s {shlex.quote(timed_script)} > /tmp/blobfish-bin/timed && "
+        "chmod +x /tmp/blobfish-bin/timed && "
+        "{ echo '=== SYSTEM ===' && uname -a && "
+        "cat /etc/os-release 2>/dev/null | head -3; "
+        "echo '=== TOOLS ===' && "
+        "command -v python3 python gcc g++ make cmake node npm cargo rustc go java javac timed; "
+        "echo '=== /app ===' && ls /app; "
+        "git -C /app log --oneline -3 2>/dev/null; "
+        "echo '=== orient.txt written ==='; } > /tmp/orient.txt 2>&1"
+    )
 
 
 def _claude_setup_cmd(

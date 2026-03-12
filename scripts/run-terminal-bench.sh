@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run-terminal-bench.sh -- Harbor run wrapper for BlobfishAgent/CchuterAgent.
+# run-terminal-bench.sh -- Harbor run wrapper for Blobfish agents.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,6 +8,8 @@ HARBOR_BIN="harbor"
 
 DATASET="terminal-bench@2.0"
 AGENT_IMPORT_PATH="blobfish_harbor:BlobfishAgent"
+AGENT_IMPORT_PATH_EXPLICIT=false
+AGENT_PROFILE="blobfish"
 ATTEMPTS=1
 N_CONCURRENT=4
 TIMEOUT_MULTIPLIER="1.0"
@@ -28,6 +30,7 @@ MAX_THINKING_TOKENS=""
 NO_PROMPT=false
 SLIM_PROMPT=false
 PROMPT_VARIANT="auto"
+CLAUDE_CODE_VERSION=""
 EXTRA_ARGS=()
 
 usage() {
@@ -35,8 +38,9 @@ usage() {
 Usage: $(basename "$0") [options] [-- <extra harbor args>]
 
 Core options:
-  --agent-import-path PATH       Import path (default: blobfish_harbor:BlobfishAgent)
-  --backend claude|codex         Backend for BlobfishAgent (default: claude)
+  --agent-import-path PATH       Import path (default: derived from --agent-profile)
+  --agent-profile PROFILE        Agent profile: blobfish, simple (default: blobfish)
+  --backend claude|codex         Backend for Blobfish agent (default: claude)
   --model MODEL                  Harbor model flag (-m), e.g. anthropic/claude-sonnet-4-5
   --agent-name NAME              Leaderboard agent name (default: env/user)
   --agent-org ORG                Leaderboard agent org (default: teamblobfish.com)
@@ -59,6 +63,7 @@ Prompt options:
 
 Claude options:
   --max-thinking-tokens N        MAX_THINKING_TOKENS passed to BlobfishAgent
+  --claude-code-version VERSION  Claude Code CLI version to install (e.g. 2.1.63)
 
 Codex/local model options:
   --openai-base-url URL          Passed as openai_base_url
@@ -77,7 +82,8 @@ die() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --agent-import-path) AGENT_IMPORT_PATH="$2"; shift 2 ;;
+    --agent-import-path) AGENT_IMPORT_PATH="$2"; AGENT_IMPORT_PATH_EXPLICIT=true; shift 2 ;;
+    --agent-profile) AGENT_PROFILE="$2"; shift 2 ;;
     --backend) BACKEND="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
     --agent-name) AGENT_NAME="$2"; shift 2 ;;
@@ -92,6 +98,7 @@ while [[ $# -gt 0 ]]; do
     --routing-table) ROUTING_ENABLED=true; ROUTING_TABLE="$2"; shift 2 ;;
     --default-model) DEFAULT_MODEL="$2"; shift 2 ;;
     --max-thinking-tokens) MAX_THINKING_TOKENS="$2"; shift 2 ;;
+    --claude-code-version) CLAUDE_CODE_VERSION="$2"; shift 2 ;;
     --no-prompt) NO_PROMPT=true; shift ;;
     --slim-prompt) SLIM_PROMPT=true; shift ;;
     --prompt-variant) PROMPT_VARIANT="$2"; shift 2 ;;
@@ -113,6 +120,14 @@ done
 
 [[ -x "$HARBOR_BIN" ]] || die "Harbor binary not found: $HARBOR_BIN"
 [[ "$BACKEND" == "claude" || "$BACKEND" == "codex" ]] || die "--backend must be claude or codex"
+[[ "$AGENT_PROFILE" == "blobfish" || "$AGENT_PROFILE" == "simple" ]] || die "--agent-profile must be blobfish or simple"
+
+if [[ "$AGENT_IMPORT_PATH_EXPLICIT" == false ]]; then
+  case "$AGENT_PROFILE" in
+    blobfish) AGENT_IMPORT_PATH="blobfish_harbor:BlobfishAgent" ;;
+    simple) AGENT_IMPORT_PATH="blobfish_harbor:BlobfishSimpleAgent" ;;
+  esac
+fi
 
 PROFILE_FILE="$REPO_ROOT/agents/$AGENT_NAME/agent.env"
 if [[ -f "$PROFILE_FILE" ]]; then
@@ -186,6 +201,9 @@ if [[ -n "$OPENAI_BASE_URL" ]]; then
 fi
 if [[ -n "$MAX_THINKING_TOKENS" ]]; then
   CMD+=( --ak "max_thinking_tokens=$MAX_THINKING_TOKENS" )
+fi
+if [[ -n "$CLAUDE_CODE_VERSION" ]]; then
+  CMD+=( --ak "version=$CLAUDE_CODE_VERSION" )
 fi
 if [[ "$NO_PROMPT" == true ]]; then
   CMD+=( --ak "use_prompt=false" )

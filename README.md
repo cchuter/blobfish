@@ -25,6 +25,11 @@ Open starter agent framework for Terminal-Bench.
 - Scripts for agent identity scaffolding and benchmark runs
 - A submission metadata helper to keep leaderboard fields consistent
 
+Agent profiles:
+
+- `blobfish_harbor:BlobfishAgent`: experimental agent with hooks, rules, and skills
+- `blobfish_harbor:BlobfishSimpleAgent`: minimal Claude runner intended to stay close to the baseline agent behavior
+
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager)
@@ -107,6 +112,19 @@ When `ANTHROPIC_BASE_URL` is set, the script automatically rewrites `localhost` 
 
 MiniMax M2.5 runs now use a model-specific `CLAUDE.md` and prompt profile automatically. That tuning is limited to agent instructions; it does not modify benchmark tasks, resources, or timeout behavior.
 
+To run the minimal baseline-style agent instead of the full Blobfish control stack:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:8081 \
+ANTHROPIC_API_KEY=no-key \
+  ./scripts/run-terminal-bench.sh \
+    --agent-profile simple \
+    --claude-code-version 2.1.63 \
+    --backend claude \
+    --model minimax/minimax-m2.5 \
+    -k 5 -n 1
+```
+
 ## Sample GitHub-name agent: `cchuter`
 
 This repo includes a sample username-mapped agent profile and class:
@@ -148,6 +166,13 @@ Prompt variants:
 ```
 
 When `prompt_variant=auto`, Blobfish uses the MiniMax-specific prompt + `CLAUDE.md` profile only for `minimax/minimax-m2.5`; all other models stay on the default profile.
+
+Runner switches:
+
+- `--agent-profile blobfish|simple`
+- `--claude-code-version VERSION`
+
+`--claude-code-version` passes Harbor agent kwarg `version`, which the Claude install template uses to install a specific Claude Code CLI version.
 
 ## Leaderboard metadata contract
 
