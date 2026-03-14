@@ -27,6 +27,8 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 class BlobfishAgent(BaseInstalledAgent):
     """Harbor agent that runs Claude or Codex in headless mode for benchmarks."""
 
+    SUPPORTS_ATIF: bool = True
+
     def __init__(
         self,
         backend: str = "claude",
@@ -324,6 +326,43 @@ class BlobfishAgent(BaseInstalledAgent):
             context.n_input_tokens = total_input + total_cache
             context.n_output_tokens = total_output
             context.n_cache_tokens = total_cache
+
+        # Generate ATIF trajectory from Claude Code session logs
+        self._write_atif_trajectory(context)
+
+
+    def _write_atif_trajectory(self, context: AgentContext) -> None:
+        """Generate ATIF trajectory.json by delegating to Harbor's ClaudeCode converter."""
+        try:
+            from harbor.agents.installed.claude_code import ClaudeCode
+        except ImportError:
+            return
+
+        # Reuse ClaudeCode's session discovery and JSONL→ATIF conversion.
+        # Both methods only depend on self.logs_dir and self.model_name,
+        # which BlobfishAgent shares via BaseInstalledAgent.
+        session_dir = ClaudeCode._get_session_dir(self)
+        if not session_dir:
+            return
+
+        try:
+            trajectory = ClaudeCode._convert_events_to_trajectory(self, session_dir)
+        except Exception as exc:
+            print(f"Failed to convert Claude Code events to ATIF trajectory: {exc}")
+            return
+
+        if not trajectory:
+            return
+
+        trajectory_path = self.logs_dir / "trajectory.json"
+        try:
+            with open(trajectory_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    trajectory.to_json_dict(), handle, indent=2, ensure_ascii=False
+                )
+            print(f"Wrote ATIF trajectory to {trajectory_path}")
+        except OSError as exc:
+            print(f"Failed to write ATIF trajectory {trajectory_path}: {exc}")
 
 
 class CchuterAgent(BlobfishAgent):
