@@ -338,15 +338,18 @@ class BlobfishAgent(BaseInstalledAgent):
         except ImportError:
             return
 
-        # Reuse ClaudeCode's session discovery and JSONL→ATIF conversion.
-        # Both methods only depend on self.logs_dir and self.model_name,
-        # which BlobfishAgent shares via BaseInstalledAgent.
-        session_dir = ClaudeCode._get_session_dir(self)
+        # Create a thin ClaudeCode instance so _convert_events_to_trajectory
+        # can call its own helper methods (e.g. _extract_text_reasoning_tool_uses).
+        proxy = object.__new__(ClaudeCode)
+        proxy.logs_dir = self.logs_dir
+        proxy.model_name = self.model_name
+
+        session_dir = ClaudeCode._get_session_dir(proxy)
         if not session_dir:
             return
 
         try:
-            trajectory = ClaudeCode._convert_events_to_trajectory(self, session_dir)
+            trajectory = proxy._convert_events_to_trajectory(session_dir)
         except Exception as exc:
             print(f"Failed to convert Claude Code events to ATIF trajectory: {exc}")
             return
