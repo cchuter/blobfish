@@ -1,0 +1,45 @@
+model: claude-opus-4-6
+target_task: gpt2-codegolf
+failing_tasks:
+  - gpt2-codegolf
+  - sparql-university
+  - torch-tensor-parallelism
+  - write-compressor
+  - make-doom-for-mips
+  - model-extraction-relu-logits
+  - polyglot-rust-c
+  - torch-pipeline-parallelism
+regression_tasks:
+  - cancel-async-tasks
+  - configure-git-webserver
+  - fix-code-vulnerability
+  - gpt2-codegolf
+  - make-doom-for-mips
+  - model-extraction-relu-logits
+  - password-recovery
+  - polyglot-rust-c
+  - sparql-university
+  - torch-pipeline-parallelism
+  - torch-tensor-parallelism
+  - write-compressor
+regression_every: 5
+max_iterations: 20
+agent_files:
+  - harbor/src/blobfish_harbor/templates/claude-project-minimax-m25.md
+  - harbor/src/blobfish_harbor/templates/hooks/pre-tool-hook.pl
+  - harbor/src/blobfish_harbor/templates/hooks/post-tool-hook.pl
+  - harbor/src/blobfish_harbor/templates/hooks/stop-hook.pl
+  - harbor/src/blobfish_harbor/templates/hooks/task-completed-hook.pl
+  - harbor/src/blobfish_harbor/templates/hooks/hook_common.pl
+  - harbor/src/blobfish_harbor/templates/project-rules/constraint-first-debugging.md
+  - harbor/src/blobfish_harbor/templates/project-rules/deadline-aware-delivery.md
+iteration_timeout: 1500
+regression_timeout: 14400
+propose_max_tokens: 16000
+evaluate_max_tokens: 8000
+thinking_budget: 10000
+harbor_backend: claude
+harbor_model: minimax/minimax-m2.5
+harbor_base_url: http://localhost:8081
+harbor_api_key: no-key
+jobs_dir: /tmp/autoresearch-trials
