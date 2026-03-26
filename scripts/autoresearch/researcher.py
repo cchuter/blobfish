@@ -2,17 +2,30 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import anthropic
 from pathlib import Path
 
 
 def _get_api_key() -> str:
-    """Get API key from env var, or fall back to Claude Code OAuth token."""
+    """Get API key from env var, macOS keychain, or Claude Code credentials file."""
     # 1. Explicit env var
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
     if key:
         return key
-    # 2. Claude Code OAuth credentials file
+    # 2. macOS keychain (where Claude Code desktop/CLI stores credentials)
+    try:
+        raw = subprocess.run(
+            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        data = json.loads(raw)
+        token = data["claudeAiOauth"]["accessToken"]
+        if token:
+            return token
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, ValueError):
+        pass
+    # 3. Claude Code OAuth credentials file (fallback)
     creds_path = Path.home() / ".claude" / ".credentials.json"
     try:
         data = json.loads(creds_path.read_text())
@@ -23,7 +36,7 @@ def _get_api_key() -> str:
         pass
     raise RuntimeError(
         "No Anthropic API key found. Set ANTHROPIC_API_KEY env var, "
-        f"or log in to Claude Code ({creds_path})."
+        "or log in to Claude Code."
     )
 
 
