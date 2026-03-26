@@ -1,52 +1,68 @@
 from __future__ import annotations
 
 import json
-import os
+import re
 import subprocess
-import anthropic
 from pathlib import Path
-
-
-def _get_api_key() -> str:
-    """Get API key from env var, macOS keychain, or Claude Code credentials file."""
-    # 1. Explicit env var
-    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    if key:
-        return key
-    # 2. macOS keychain (where Claude Code desktop/CLI stores credentials)
-    try:
-        raw = subprocess.run(
-            ["security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        data = json.loads(raw)
-        token = data["claudeAiOauth"]["accessToken"]
-        if token:
-            return token
-    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, ValueError):
-        pass
-    # 3. Claude Code OAuth credentials file (fallback)
-    creds_path = Path.home() / ".claude" / ".credentials.json"
-    try:
-        data = json.loads(creds_path.read_text())
-        token = data["claudeAiOauth"]["accessToken"]
-        if token:
-            return token
-    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError):
-        pass
-    raise RuntimeError(
-        "No Anthropic API key found. Set ANTHROPIC_API_KEY env var, "
-        "or log in to Claude Code."
-    )
-
-
-def _get_client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(api_key=_get_api_key())
 
 
 def _load_prompt(name: str) -> str:
     prompt_path = Path(__file__).parent / "prompts" / f"{name}.md"
     return prompt_path.read_text()
+
+
+def _call_claude(system_prompt: str, user_content: str, model: str) -> str:
+    """Call claude CLI in print mode. Returns the text response."""
+    result = subprocess.run(
+        [
+            "claude",
+            "-p",
+            "--output-format", "json",
+            "--model", model,
+            "--system-prompt", system_prompt,
+            "--no-session-persistence",
+        ],
+        input=user_content,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"claude CLI failed (exit {result.returncode}): {result.stderr[:500]}"
+        )
+    # Parse the JSON output to extract the text response
+    try:
+        data = json.loads(result.stdout)
+        # claude --output-format json returns {"type":"result","result":"..."}
+        return data.get("result", result.stdout)
+    except json.JSONDecodeError:
+        return result.stdout
+
+
+def _parse_json_response(text: str) -> dict:
+    """Extract JSON from a response that may contain markdown fences or prose."""
+    text = text.strip()
+    # Try direct parse first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Try extracting from markdown code fence
+    fence_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1))
+        except json.JSONDecodeError:
+            pass
+    # Try finding the outermost JSON object
+    brace_match = re.search(r'\{[\s\S]*\}', text)
+    if brace_match:
+        try:
+            return json.loads(brace_match.group(0))
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(f"Could not parse JSON from response: {text[:200]}")
 
 
 def propose(
@@ -61,8 +77,6 @@ def propose(
     """Call Claude to propose a change.
     Returns dict with keys: file, hypothesis, old_string, new_string
     OR: file, hypothesis, full_content"""
-    client = _get_client()
-
     user_content = "## Research Log\n\n" + research_log + "\n\n"
     user_content += "## Current Agent Files\n\n"
     for path, content in agent_files.items():
@@ -76,29 +90,8 @@ def propose(
             f"Please ensure old_string matches the file content exactly."
         )
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        thinking={
-            "type": "enabled",
-            "budget_tokens": thinking_budget,
-        },
-        system=_load_prompt("propose"),
-        messages=[{"role": "user", "content": user_content}],
-    )
-
-    # Extract text content (skip thinking blocks)
-    text = ""
-    for block in response.content:
-        if block.type == "text":
-            text = block.text
-            break
-
-    # Parse JSON from response (may be wrapped in ```json ... ```)
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-    return json.loads(text)
+    text = _call_claude(_load_prompt("propose"), user_content, model)
+    return _parse_json_response(text)
 
 
 def evaluate(
@@ -113,8 +106,6 @@ def evaluate(
 ) -> dict:
     """Call Claude to evaluate a change.
     Returns dict with keys: verdict, reasoning, key_observations, next_direction"""
-    client = _get_client()
-
     user_content = "## Change Made\n\n"
     user_content += f"**File:** {change['file']}\n"
     user_content += f"**Hypothesis:** {change['hypothesis']}\n\n"
@@ -123,24 +114,5 @@ def evaluate(
     user_content += f"## After (result: {'PASS' if after_result else 'FAIL'})\n\n"
     user_content += after_trajectory
 
-    response = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        thinking={
-            "type": "enabled",
-            "budget_tokens": thinking_budget,
-        },
-        system=_load_prompt("evaluate"),
-        messages=[{"role": "user", "content": user_content}],
-    )
-
-    text = ""
-    for block in response.content:
-        if block.type == "text":
-            text = block.text
-            break
-
-    text = text.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-    return json.loads(text)
+    text = _call_claude(_load_prompt("evaluate"), user_content, model)
+    return _parse_json_response(text)
