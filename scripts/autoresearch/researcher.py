@@ -1,27 +1,34 @@
 from __future__ import annotations
 
 import json
+import os
 import anthropic
 from pathlib import Path
 
 
-def _read_oauth_token() -> str:
+def _get_api_key() -> str:
+    """Get API key from env var, or fall back to Claude Code OAuth token."""
+    # 1. Explicit env var
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if key:
+        return key
+    # 2. Claude Code OAuth credentials file
     creds_path = Path.home() / ".claude" / ".credentials.json"
     try:
         data = json.loads(creds_path.read_text())
         token = data["claudeAiOauth"]["accessToken"]
-        if not token:
-            raise ValueError("accessToken is empty")
-        return token
-    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError) as e:
-        raise RuntimeError(
-            f"Cannot read Claude OAuth token from {creds_path}: {e}\n"
-            "Please log in to Claude Code first (run 'claude' and authenticate)."
-        ) from e
+        if token:
+            return token
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, ValueError):
+        pass
+    raise RuntimeError(
+        "No Anthropic API key found. Set ANTHROPIC_API_KEY env var, "
+        f"or log in to Claude Code ({creds_path})."
+    )
 
 
 def _get_client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(api_key=_read_oauth_token())
+    return anthropic.Anthropic(api_key=_get_api_key())
 
 
 def _load_prompt(name: str) -> str:
