@@ -19,15 +19,8 @@ max_input = 0
 total_output = 0
 turns = 0
 
-def get_tokens(usage):
-    """Extract input/output tokens from a usage dict, handling both naming conventions."""
-    inp = (
-        (usage.get("input_tokens") or usage.get("inputTokens") or 0)
-        + (usage.get("cache_read_input_tokens") or usage.get("cacheReadInputTokens") or 0)
-        + (usage.get("cache_creation_input_tokens") or usage.get("cacheCreationInputTokens") or 0)
-    )
-    out = usage.get("output_tokens") or usage.get("outputTokens") or 0
-    return inp, out
+# First pass: dump a sample usage block so we can see the actual format
+sample_shown = False
 
 for line in open(output_file):
     line = line.strip()
@@ -38,24 +31,42 @@ for line in open(output_file):
     except json.JSONDecodeError:
         continue
 
-    # Check all places usage might live
-    found = None
-    for candidate in [
-        msg.get("usage"),
-        (msg.get("message") or {}).get("usage"),
-        (msg.get("result") or {}).get("usage"),
-    ]:
-        if isinstance(candidate, dict) and candidate:
-            found = candidate
-            break
+    # Walk the entire JSON tree looking for any dict with token-related keys
+    def find_usage(obj, path=""):
+        global max_input, total_output, turns, sample_shown
+        if isinstance(obj, dict):
+            # Check if this dict has token keys
+            token_keys = [k for k in obj if "token" in k.lower()]
+            if token_keys and not sample_shown:
+                print(f"=== Sample usage at {path or 'root'} ===")
+                print(json.dumps({k: obj[k] for k in token_keys}, indent=2))
+                print()
+                sample_shown = True
 
-    if found:
-        inp, out = get_tokens(found)
-        if inp > 0:
-            turns += 1
-            if inp > max_input:
-                max_input = inp
-            total_output += out
+            if token_keys:
+                inp = 0
+                for k in obj:
+                    kl = k.lower()
+                    if "input_token" in kl or "inputtoken" in kl:
+                        inp += (obj[k] or 0)
+                out = 0
+                for k in obj:
+                    kl = k.lower()
+                    if "output_token" in kl or "outputtoken" in kl:
+                        out += (obj[k] or 0)
+                if inp > 0:
+                    turns += 1
+                    if inp > max_input:
+                        max_input = inp
+                    total_output += out
+
+            for k, v in obj.items():
+                find_usage(v, f"{path}.{k}")
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                find_usage(v, f"{path}[{i}]")
+
+    find_usage(msg)
 
 print(f"API turns: {turns}")
 print(f"Peak input tokens: {max_input:,}")
