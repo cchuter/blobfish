@@ -261,6 +261,47 @@ sub update_evidence {
     return @merged;
 }
 
+sub write_run_state {
+    my $summary = "";
+
+    # 1. Timing — current_timing() returns ($now, $elapsed, $timeout)
+    my (undef, $elapsed, $timeout) = current_timing();
+    if (defined $elapsed) {
+        my $remaining = $timeout - $elapsed;
+        $summary .= "Time: ${elapsed}s elapsed, ${remaining}s remaining.\n";
+    }
+
+    # 2. Output written
+    my @output_lines = read_lines(state_path('output_written'));
+    my $output = @output_lines ? $output_lines[0] : '';
+    if ($output) {
+        $summary .= "Output file: $output\n";
+    }
+
+    # 3. Recent evidence (last 4 lines)
+    my @evidence = read_lines(state_path('recent_evidence'));
+    if (@evidence) {
+        $summary .= "Recent evidence:\n";
+        for my $line (@evidence) {
+            $summary .= "  $line\n";
+        }
+    }
+
+    # 4. Pending validation
+    my $pending = read_int(state_path('pending_validation'), 0);
+    if ($pending) {
+        $summary .= "WARNING: Output has unvalidated changes — test before finishing.\n";
+    }
+
+    # 5. Nudge count (how many times agent saw evidence without writing)
+    my $nudges = read_int(state_path('nudge_count'), 0);
+    if ($nudges > 0) {
+        $summary .= "Evidence seen without output write: $nudges times.\n";
+    }
+
+    write_text(state_path('run_state_summary'), $summary);
+}
+
 sub mark_pending_validation {
     write_text(state_path('pending_validation'), "1\n");
     write_text(state_path('stop_blocked'), "0\n");
