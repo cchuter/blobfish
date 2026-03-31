@@ -52,3 +52,4 @@ if (!$output_written && @recent_evidence >= 2) {
 
 log_line("$event tool=$tool_name elapsed=$elapsed timeout=$timeout output_written=$output_written pending_validation=$pending_validation evidence_count=" . scalar(@recent_evidence));
 emit_additional_context($event, $msg);
+write_run_state();
