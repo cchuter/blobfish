@@ -149,12 +149,62 @@ class BlobfishAgent(BaseInstalledAgent):
 
         return backend, model_name
 
+    # --- Harbor 0.1.x API (ExecInput-based) ---
+
     def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
         escaped = shlex.quote(instruction)
         backend, model_name = self._resolve_backend_and_model()
         if backend == "codex":
             return self._create_codex_run_commands(escaped, model_name=model_name)
         return self._create_claude_run_commands(escaped, model_name=model_name)
+
+    # --- Harbor 0.3.x API (async run/install) ---
+
+    async def install(self, environment) -> None:
+        """Install Claude Code CLI inside the container (Harbor 0.3+ API)."""
+        from harbor.agents.installed.base import BaseInstalledAgent
+        # Use exec_as_root if available (0.3+), otherwise skip
+        if not hasattr(self, "exec_as_root"):
+            return
+        await self.exec_as_root(
+            environment,
+            command=(
+                "if command -v apt-get &> /dev/null; then"
+                "  apt-get update && apt-get install -y curl;"
+                " fi"
+            ),
+            env={"DEBIAN_FRONTEND": "noninteractive"},
+        )
+        await self.exec_as_agent(
+            environment,
+            command=(
+                "set -euo pipefail; "
+                "curl -fsSL https://claude.ai/install.sh | bash -s -- && "
+                'export PATH="$HOME/.local/bin:$PATH" && '
+                "claude --version"
+            ),
+        )
+
+    async def run(self, instruction: str, environment, context) -> None:
+        """Run the agent (Harbor 0.3+ API). Mirrors create_run_agent_commands logic."""
+        if not hasattr(self, "exec_as_agent"):
+            raise NotImplementedError(
+                "BlobfishAgent.run() requires Harbor 0.3+ with exec_as_agent support"
+            )
+        escaped = shlex.quote(instruction)
+        backend, model_name = self._resolve_backend_and_model()
+
+        if backend == "codex":
+            cmds = self._create_codex_run_commands(escaped, model_name=model_name)
+        else:
+            cmds = self._create_claude_run_commands(escaped, model_name=model_name)
+
+        for cmd in cmds:
+            await self.exec_as_agent(
+                environment,
+                command=cmd.command,
+                env=cmd.env if cmd.env else None,
+            )
 
     def _create_claude_run_commands(
         self, escaped_instruction: str, model_name: str | None = None
