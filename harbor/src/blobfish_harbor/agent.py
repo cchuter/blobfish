@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shlex
+import sys
 import time
 import tomllib
 from pathlib import Path
@@ -790,6 +791,11 @@ def _looks_incompatible_model_for_backend(model_name: str | None, backend: str) 
 
 
 def _rewrite_localhost_for_docker(url: str | None) -> str | None:
+    """Rewrite localhost URLs for Docker container access.
+
+    On Linux, containers use network_mode=host so localhost works directly.
+    On macOS/Windows (Docker Desktop), rewrite to host.docker.internal.
+    """
     if not url:
         return None
     try:
@@ -797,6 +803,11 @@ def _rewrite_localhost_for_docker(url: str | None) -> str | None:
     except ValueError:
         return url
     if parsed.hostname not in {"localhost", "127.0.0.1"}:
+        return url
+
+    # With network_mode=host (Linux), localhost resolves correctly inside
+    # the container — no rewrite needed.
+    if sys.platform == "linux":
         return url
 
     host_gateway = os.environ.get("BLOBFISH_DOCKER_HOST_GATEWAY", "host.docker.internal").strip()

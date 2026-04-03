@@ -193,11 +193,9 @@ fi
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 if [[ -n "$ANTHROPIC_BASE_URL" ]]; then
-  DOCKER_BASE_URL="$ANTHROPIC_BASE_URL"
-  # Rewrite localhost for Docker
-  DOCKER_BASE_URL="${DOCKER_BASE_URL//localhost/host.docker.internal}"
-  DOCKER_BASE_URL="${DOCKER_BASE_URL//127.0.0.1/host.docker.internal}"
-  CMD+=( --ae "ANTHROPIC_BASE_URL=$DOCKER_BASE_URL" )
+  # Use host networking so the container can reach the host server directly.
+  # With network_mode=host, localhost works as-is — no rewrite needed.
+  CMD+=( --ae "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" )
   CMD+=( --ae "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-no-key}" )
   CMD+=( --ek "network_mode=host" )
   CMD+=( --no-force-build )
