@@ -419,6 +419,10 @@ class BlobfishAgent(BaseInstalledAgent):
         if not session_dir:
             return
 
+        # Claude Code writes session JSONL files with 0600 permissions.
+        # On timeout the in-run chmod doesn't execute, so fix permissions here.
+        _fix_session_file_permissions(Path(session_dir))
+
         try:
             trajectory = proxy._convert_events_to_trajectory(session_dir)
         except Exception as exc:
@@ -791,6 +795,21 @@ def _looks_incompatible_model_for_backend(model_name: str | None, backend: str) 
     if backend == "codex":
         return "claude" in low or low.startswith("anthropic/")
     return False
+
+
+def _fix_session_file_permissions(session_dir: Path) -> None:
+    """Best-effort chmod of Claude Code session JSONL files to 0644.
+
+    Claude Code writes these with 0600. The in-run chmod handles the normal
+    case; this covers any files still restricted (e.g. after a clean exit
+    where the shell chmod was skipped). On timeout, files are still owned by
+    root and this will silently fail — the trajectory is optional.
+    """
+    for jsonl in session_dir.glob("**/*.jsonl"):
+        try:
+            jsonl.chmod(0o644)
+        except OSError:
+            pass
 
 
 def _rewrite_localhost_for_docker(url: str | None) -> str | None:
