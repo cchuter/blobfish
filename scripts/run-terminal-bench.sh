@@ -193,11 +193,20 @@ fi
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 if [[ -n "$ANTHROPIC_BASE_URL" ]]; then
-  # Use host networking so the container can reach the host server directly.
-  # With network_mode=host, localhost works as-is — no rewrite needed.
-  CMD+=( --ae "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" )
+  DOCKER_BASE_URL="$ANTHROPIC_BASE_URL"
+  # Rewrite localhost so the container can reach the host.
+  # On Linux (bridge network), use the Docker bridge gateway IP.
+  # On macOS/Windows (Docker Desktop), use host.docker.internal.
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    GATEWAY=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo "172.17.0.1")
+    DOCKER_BASE_URL="${DOCKER_BASE_URL//localhost/$GATEWAY}"
+    DOCKER_BASE_URL="${DOCKER_BASE_URL//127.0.0.1/$GATEWAY}"
+  else
+    DOCKER_BASE_URL="${DOCKER_BASE_URL//localhost/host.docker.internal}"
+    DOCKER_BASE_URL="${DOCKER_BASE_URL//127.0.0.1/host.docker.internal}"
+  fi
+  CMD+=( --ae "ANTHROPIC_BASE_URL=$DOCKER_BASE_URL" )
   CMD+=( --ae "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-no-key}" )
-  CMD+=( --ek "network_mode=host" )
   CMD+=( --no-force-build )
 fi
 

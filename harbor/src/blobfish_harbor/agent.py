@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 import time
 import tomllib
@@ -791,10 +792,11 @@ def _looks_incompatible_model_for_backend(model_name: str | None, backend: str) 
 
 
 def _rewrite_localhost_for_docker(url: str | None) -> str | None:
-    """Rewrite localhost URLs for Docker container access.
+    """Rewrite localhost URLs so they reach the host from inside a Docker container.
 
-    On Linux, containers use network_mode=host so localhost works directly.
-    On macOS/Windows (Docker Desktop), rewrite to host.docker.internal.
+    On macOS/Windows (Docker Desktop), host.docker.internal works out of the box.
+    On Linux, Docker bridge containers can't reach host via localhost —
+    use the bridge gateway IP (typically 172.17.0.1) instead.
     """
     if not url:
         return None
@@ -805,14 +807,28 @@ def _rewrite_localhost_for_docker(url: str | None) -> str | None:
     if parsed.hostname not in {"localhost", "127.0.0.1"}:
         return url
 
-    # With network_mode=host (Linux), localhost resolves correctly inside
-    # the container — no rewrite needed.
     if sys.platform == "linux":
-        return url
+        default_gateway = _docker_bridge_gateway() or "172.17.0.1"
+    else:
+        default_gateway = "host.docker.internal"
 
-    host_gateway = os.environ.get("BLOBFISH_DOCKER_HOST_GATEWAY", "host.docker.internal").strip()
+    host_gateway = os.environ.get("BLOBFISH_DOCKER_HOST_GATEWAY", default_gateway).strip()
     if not host_gateway:
         return url
 
     netloc = parsed.netloc.replace(parsed.hostname, host_gateway, 1)
     return urlunparse(parsed._replace(netloc=netloc))
+
+
+def _docker_bridge_gateway() -> str | None:
+    """Return the gateway IP of the default Docker bridge network."""
+    try:
+        result = subprocess.run(
+            ["docker", "network", "inspect", "bridge",
+             "--format", "{{(index .IPAM.Config 0).Gateway}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        ip = result.stdout.strip()
+        return ip if ip else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
