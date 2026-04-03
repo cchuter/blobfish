@@ -289,6 +289,7 @@ class BlobfishAgent(BaseInstalledAgent):
             )
 
         run_cmd = (
+            "umask 0022 && "
             "export PATH=\"/tmp/blobfish-bin:$HOME/.local/bin:$PATH\" && "
             "claude --verbose --output-format stream-json "
             "--permission-mode bypassPermissions "
