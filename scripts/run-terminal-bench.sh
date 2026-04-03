@@ -161,7 +161,8 @@ fi
 # Detect Harbor version to use correct task filter flag
 # Harbor 0.3+ uses -i/--include-task-name; older uses -t
 TASK_FLAG="-t"
-if "$HARBOR_BIN" run --help 2>/dev/null | grep -q 'include-task-name' 2>/dev/null; then
+_harbor_help=$("$HARBOR_BIN" run --help 2>&1 || true)
+if echo "$_harbor_help" | grep -q 'include-task-name'; then
   TASK_FLAG="-i"
 fi
 for task in "${TASKS[@]+"${TASKS[@]}"}"; do
