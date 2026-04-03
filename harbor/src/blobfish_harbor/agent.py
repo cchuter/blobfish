@@ -295,7 +295,9 @@ class BlobfishAgent(BaseInstalledAgent):
             "export PATH=\"/tmp/blobfish-bin:$HOME/.local/bin:$PATH\" && "
             "claude --verbose --output-format stream-json "
             "--permission-mode bypassPermissions "
-            f"-p {escaped_instruction} 2>&1 </dev/null | tee /logs/agent/blobfish-output.txt"
+            f"-p {escaped_instruction} 2>&1 </dev/null | tee /logs/agent/blobfish-output.txt; "
+            "chmod -R a+r /logs/agent/sessions 2>/dev/null; "
+            "true"
         )
 
         return [ExecInput(command=setup_cmd, env=env), ExecInput(command=run_cmd, env=env)]
