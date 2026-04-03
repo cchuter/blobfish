@@ -118,7 +118,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -x "$HARBOR_BIN" ]] || die "Harbor binary not found: $HARBOR_BIN"
+command -v "$HARBOR_BIN" &>/dev/null || die "Harbor binary not found: $HARBOR_BIN (is it on PATH?)"
 [[ "$BACKEND" == "claude" || "$BACKEND" == "codex" ]] || die "--backend must be claude or codex"
 [[ "$AGENT_PROFILE" == "blobfish" || "$AGENT_PROFILE" == "simple" ]] || die "--agent-profile must be blobfish or simple"
 
@@ -161,7 +161,7 @@ fi
 # Detect Harbor version to use correct task filter flag
 # Harbor 0.3+ uses -i/--include-task-name; older uses -t
 TASK_FLAG="-t"
-if "$HARBOR_BIN" run --help 2>&1 | grep -q -- '--include-task-name'; then
+if "$HARBOR_BIN" run --help 2>/dev/null | grep -q 'include-task-name' 2>/dev/null; then
   TASK_FLAG="-i"
 fi
 for task in "${TASKS[@]+"${TASKS[@]}"}"; do
