@@ -16,9 +16,25 @@ import tomllib
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
-from harbor.agents.installed.base import BaseInstalledAgent, ExecInput
+from harbor.agents.installed.base import BaseInstalledAgent
+
+try:
+    from harbor.agents.installed.base import ExecInput
+except ImportError:
+    from dataclasses import dataclass, field
+
+    @dataclass
+    class ExecInput:
+        command: str
+        env: dict[str, str] = field(default_factory=dict)
+
 from harbor.models.agent.context import AgentContext
-from harbor.models.trial.result import AgentInfo, ModelInfo
+
+try:
+    from harbor.models.trial.result import AgentInfo, ModelInfo
+except ImportError:
+    AgentInfo = None
+    ModelInfo = None
 
 DEFAULT_AGENT_ORG = "teamblobfish.com"
 TEMPLATES_DIR = Path(__file__).parent / "templates"

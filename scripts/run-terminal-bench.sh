@@ -158,8 +158,14 @@ fi
 if [[ -n "$JOBS_DIR" ]]; then
   CMD+=( --jobs-dir "$JOBS_DIR" )
 fi
+# Detect Harbor version to use correct task filter flag
+# Harbor 0.3+ uses -i/--include-task-name; older uses -t
+TASK_FLAG="-t"
+if "$HARBOR_BIN" run --help 2>&1 | grep -q -- '--include-task-name'; then
+  TASK_FLAG="-i"
+fi
 for task in "${TASKS[@]+"${TASKS[@]}"}"; do
-  CMD+=( -t "$task" )
+  CMD+=( "$TASK_FLAG" "$task" )
 done
 for task in "${EXCLUDE_TASKS[@]+"${EXCLUDE_TASKS[@]}"}"; do
   CMD+=( -x "$task" )
