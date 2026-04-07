@@ -204,11 +204,11 @@ class BlobfishAgent(BaseInstalledAgent):
         )
 
     async def run(self, instruction: str, environment, context) -> None:
-        """Run the agent (Harbor 0.3+ API). Mirrors create_run_agent_commands logic."""
+        """Run the agent. On Harbor 0.1.x, delegates to parent (which calls
+        create_run_agent_commands). On Harbor 0.3+, uses exec_as_agent directly."""
         if not hasattr(self, "exec_as_agent"):
-            raise NotImplementedError(
-                "BlobfishAgent.run() requires Harbor 0.3+ with exec_as_agent support"
-            )
+            # Harbor 0.1.x: parent's run() calls create_run_agent_commands()
+            return await super().run(instruction, environment, context)
         escaped = shlex.quote(instruction)
         backend, model_name = self._resolve_backend_and_model()
 
