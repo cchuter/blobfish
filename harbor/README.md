@@ -9,13 +9,14 @@ Run Blobfish agents with Harbor on `terminal-bench@2.0`.
 - `blobfish_harbor:CchuterAgent` (sample GitHub-name agent)
 
 Both use the same core logic and support:
-- `prompt_variant=auto` (default; resolves to `full` for most models and `minimax-m2.5` for MiniMax M2.5)
+- `prompt_variant=auto` (default; resolves to `full` for most models, `minimax` for MiniMax models, and `qwen` for Qwen models)
 - `prompt_variant=full`
 - `prompt_variant=slim`
-- `prompt_variant=minimax-m2.5`
+- `prompt_variant=minimax`
+- `prompt_variant=qwen`
 - `use_prompt=false`
 
-For `prompt_variant=minimax-m2.5`, `BlobfishAgent` applies both a MiniMax-specific prompt template and a MiniMax-specific project `CLAUDE.md`. Other variants use the default project `CLAUDE.md`.
+For `prompt_variant=minimax` or `prompt_variant=qwen`, `BlobfishAgent` applies both a variant-specific prompt template and project `CLAUDE.md`. Other variants use the default project `CLAUDE.md`.
 
 `BlobfishSimpleAgent` is intentionally minimal:
 

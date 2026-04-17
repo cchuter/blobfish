@@ -27,6 +27,11 @@ DEFAULT_MODEL=""
 OPENAI_BASE_URL=""
 OPENAI_API_KEY=""
 MAX_THINKING_TOKENS=""
+RESTART_SERVER_BETWEEN_TASKS=false
+RESTART_SERVER_COMMAND=""
+RESTART_SERVER_READY_URL=""
+RESTART_SERVER_READY_TIMEOUT_SEC=""
+RESTART_SERVER_READY_INTERVAL_SEC=""
 NO_PROMPT=false
 SLIM_PROMPT=false
 PROMPT_VARIANT="auto"
@@ -59,7 +64,7 @@ Routing options:
 Prompt options:
   --no-prompt                    Disable prompt template (use_prompt=false)
   --slim-prompt                  Use slim prompt variant (prompt_variant=slim)
-  --prompt-variant NAME          Prompt variant: auto, full, slim, minimax-m2.5
+  --prompt-variant NAME          Prompt variant: auto, full, slim, minimax, qwen
 
 Claude options:
   --max-thinking-tokens N        MAX_THINKING_TOKENS passed to BlobfishAgent
@@ -68,6 +73,13 @@ Claude options:
 Codex/local model options:
   --openai-base-url URL          Passed as openai_base_url
   --openai-api-key KEY           Exported as OPENAI_API_KEY for this run only
+  --restart-server-between-tasks Enable host-side server restart on task transitions
+  --restart-server-command CMD   Host command to run when restarting between tasks
+  --restart-server-ready-url URL URL polled after restart until the server is ready
+  --restart-server-ready-timeout SEC
+                                 Readiness timeout in seconds (default: Harbor default)
+  --restart-server-ready-interval SEC
+                                 Readiness poll interval in seconds (default: Harbor default)
 
 Job/output options:
   --job-name NAME                Harbor job name
@@ -99,6 +111,11 @@ while [[ $# -gt 0 ]]; do
     --default-model) DEFAULT_MODEL="$2"; shift 2 ;;
     --max-thinking-tokens) MAX_THINKING_TOKENS="$2"; shift 2 ;;
     --claude-code-version) CLAUDE_CODE_VERSION="$2"; shift 2 ;;
+    --restart-server-between-tasks) RESTART_SERVER_BETWEEN_TASKS=true; shift ;;
+    --restart-server-command) RESTART_SERVER_COMMAND="$2"; shift 2 ;;
+    --restart-server-ready-url) RESTART_SERVER_READY_URL="$2"; shift 2 ;;
+    --restart-server-ready-timeout) RESTART_SERVER_READY_TIMEOUT_SEC="$2"; shift 2 ;;
+    --restart-server-ready-interval) RESTART_SERVER_READY_INTERVAL_SEC="$2"; shift 2 ;;
     --no-prompt) NO_PROMPT=true; shift ;;
     --slim-prompt) SLIM_PROMPT=true; shift ;;
     --prompt-variant) PROMPT_VARIANT="$2"; shift 2 ;;
@@ -121,6 +138,12 @@ done
 [[ -x "$HARBOR_BIN" ]] || die "Harbor binary not found: $HARBOR_BIN"
 [[ "$BACKEND" == "claude" || "$BACKEND" == "codex" ]] || die "--backend must be claude or codex"
 [[ "$AGENT_PROFILE" == "blobfish" || "$AGENT_PROFILE" == "simple" ]] || die "--agent-profile must be blobfish or simple"
+if [[ "$RESTART_SERVER_BETWEEN_TASKS" == true && -z "$RESTART_SERVER_COMMAND" ]]; then
+  die "--restart-server-command is required when --restart-server-between-tasks is set"
+fi
+if [[ "$RESTART_SERVER_BETWEEN_TASKS" == true && "$N_CONCURRENT" != "1" ]]; then
+  die "--restart-server-between-tasks requires -n 1"
+fi
 
 if [[ "$AGENT_IMPORT_PATH_EXPLICIT" == false ]]; then
   case "$AGENT_PROFILE" in
@@ -158,6 +181,19 @@ fi
 if [[ -n "$JOBS_DIR" ]]; then
   CMD+=( --jobs-dir "$JOBS_DIR" )
 fi
+if [[ "$RESTART_SERVER_BETWEEN_TASKS" == true ]]; then
+  CMD+=( --ok "restart_between_tasks=true" )
+  CMD+=( --ok "restart_command=$RESTART_SERVER_COMMAND" )
+  if [[ -n "$RESTART_SERVER_READY_URL" ]]; then
+    CMD+=( --ok "restart_ready_url=$RESTART_SERVER_READY_URL" )
+  fi
+  if [[ -n "$RESTART_SERVER_READY_TIMEOUT_SEC" ]]; then
+    CMD+=( --ok "restart_ready_timeout_sec=$RESTART_SERVER_READY_TIMEOUT_SEC" )
+  fi
+  if [[ -n "$RESTART_SERVER_READY_INTERVAL_SEC" ]]; then
+    CMD+=( --ok "restart_ready_interval_sec=$RESTART_SERVER_READY_INTERVAL_SEC" )
+  fi
+fi
 for task in "${TASKS[@]+"${TASKS[@]}"}"; do
   CMD+=( -t "$task" )
 done
@@ -187,7 +223,7 @@ ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 if [[ -n "$ANTHROPIC_BASE_URL" ]]; then
   DOCKER_BASE_URL="$ANTHROPIC_BASE_URL"
-  # Rewrite localhost for Docker
+  # Rewrite localhost for Docker containers to reach the host-side proxy/server.
   DOCKER_BASE_URL="${DOCKER_BASE_URL//localhost/host.docker.internal}"
   DOCKER_BASE_URL="${DOCKER_BASE_URL//127.0.0.1/host.docker.internal}"
   CMD+=( --ae "ANTHROPIC_BASE_URL=$DOCKER_BASE_URL" )
@@ -221,6 +257,10 @@ printf '  %q' "${CMD[@]}"
 echo
 
 cd "$REPO_ROOT"
+if [[ "$RESTART_SERVER_BETWEEN_TASKS" == true ]]; then
+  echo "Preflight: ensuring restart target is healthy before Harbor starts..."
+  /bin/bash -lc "$(printf '%q' "$RESTART_SERVER_COMMAND") restart"
+fi
 if [[ -n "$OPENAI_API_KEY" ]]; then
   OPENAI_API_KEY="$OPENAI_API_KEY" "${CMD[@]}"
 else

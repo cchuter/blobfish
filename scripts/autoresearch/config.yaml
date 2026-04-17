@@ -25,7 +25,7 @@ regression_tasks:
 regression_every: 5
 max_iterations: 20
 agent_files:
-  - harbor/src/blobfish_harbor/templates/claude-project-minimax-m25.md
+  - harbor/src/blobfish_harbor/templates/claude-project-minimax.md
   - harbor/src/blobfish_harbor/templates/hooks/pre-tool-hook.pl
   - harbor/src/blobfish_harbor/templates/hooks/post-tool-hook.pl
   - harbor/src/blobfish_harbor/templates/hooks/stop-hook.pl

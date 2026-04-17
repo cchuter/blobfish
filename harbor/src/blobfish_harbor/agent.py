@@ -422,42 +422,56 @@ def _normalize_prompt_variant(prompt_variant: str | None) -> str:
     if not value:
         value = "auto"
     aliases = {
-        "minimax": "minimax-m2.5",
-        "minimax-m25": "minimax-m2.5",
-        "minimax_m25": "minimax-m2.5",
+        "minimax-m2.5": "minimax",
+        "minimax-m25": "minimax",
+        "minimax_m25": "minimax",
+        "qwen3": "qwen",
+        "qwen3.5": "qwen",
+        "qwen3.6": "qwen",
     }
     value = aliases.get(value, value)
-    if value not in {"auto", "full", "slim", "minimax-m2.5"}:
-        raise ValueError("prompt_variant must be one of: auto, full, slim, minimax-m2.5")
+    if value not in {"auto", "full", "slim", "minimax", "qwen"}:
+        raise ValueError("prompt_variant must be one of: auto, full, slim, minimax, qwen")
     return value
 
 
 def _resolve_prompt_variant(prompt_variant: str, model_name: str | None) -> str:
     if prompt_variant != "auto":
         return prompt_variant
-    if _is_minimax_m25(model_name):
-        return "minimax-m2.5"
+    if _is_minimax(model_name):
+        return "minimax"
+    if _is_qwen(model_name):
+        return "qwen"
     return "full"
 
 
-def _is_minimax_m25(model_name: str | None) -> bool:
+def _is_minimax(model_name: str | None) -> bool:
     if not model_name:
         return False
-    low = model_name.lower()
-    return "minimax-m2.5" in low
+    return "minimax" in model_name.lower()
+
+
+def _is_qwen(model_name: str | None) -> bool:
+    if not model_name:
+        return False
+    return "qwen" in model_name.lower()
 
 
 def _prompt_template_path(prompt_variant: str) -> Path:
     if prompt_variant == "slim":
         return TEMPLATES_DIR / "prompt-slim.md.j2"
-    if prompt_variant == "minimax-m2.5":
-        return TEMPLATES_DIR / "prompt-minimax-m25.md.j2"
+    if prompt_variant == "minimax":
+        return TEMPLATES_DIR / "prompt-minimax.md.j2"
+    if prompt_variant == "qwen":
+        return TEMPLATES_DIR / "prompt-qwen.md.j2"
     return TEMPLATES_DIR / "prompt.md.j2"
 
 
 def _project_claude_md(prompt_variant: str) -> str:
-    if prompt_variant == "minimax-m2.5":
-        path = TEMPLATES_DIR / "claude-project-minimax-m25.md"
+    if prompt_variant == "minimax":
+        path = TEMPLATES_DIR / "claude-project-minimax.md"
+    elif prompt_variant == "qwen":
+        path = TEMPLATES_DIR / "claude-project-qwen.md"
     else:
         path = TEMPLATES_DIR / "claude-project-default.md"
     return path.read_text()

@@ -19,9 +19,9 @@ Open starter agent framework for Terminal-Bench.
 - Prompt/`CLAUDE.md` template setup:
   - `harbor/src/blobfish_harbor/templates/prompt.md.j2` (full)
   - `harbor/src/blobfish_harbor/templates/prompt-slim.md.j2` (slim)
-  - `harbor/src/blobfish_harbor/templates/prompt-minimax-m25.md.j2` (MiniMax M2.5 local-model profile)
+  - `harbor/src/blobfish_harbor/templates/prompt-minimax.md.j2` (MiniMax local-model profile)
   - `harbor/src/blobfish_harbor/templates/claude-project-default.md` (default project instructions)
-  - `harbor/src/blobfish_harbor/templates/claude-project-minimax-m25.md` (MiniMax M2.5 project instructions)
+  - `harbor/src/blobfish_harbor/templates/claude-project-minimax.md` (MiniMax project instructions)
 - Scripts for agent identity scaffolding and benchmark runs
 - A submission metadata helper to keep leaderboard fields consistent
 
@@ -155,8 +155,8 @@ Prompt variants:
 # Slim prompt
 ./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --slim-prompt -k 1
 
-# Explicit MiniMax M2.5 prompt
-./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --prompt-variant minimax-m2.5 --model minimax/minimax-m2.5 -k 1
+# Explicit MiniMax prompt
+./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --prompt-variant minimax --model minimax/minimax-m2.5 -k 1
 
 # No prompt template
 ./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --no-prompt -k 1
@@ -165,7 +165,7 @@ Prompt variants:
 ./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude -t "fix-git*" -k 1 -n 1
 ```
 
-When `prompt_variant=auto`, Blobfish uses the MiniMax-specific prompt + `CLAUDE.md` profile only for `minimax/minimax-m2.5`; all other models stay on the default profile.
+When `prompt_variant=auto`, Blobfish uses the MiniMax-specific prompt + `CLAUDE.md` profile for any model with "minimax" in its name, the Qwen-specific profile for any model with "qwen" in its name, and the default profile for everything else.
 
 Runner switches:
 
