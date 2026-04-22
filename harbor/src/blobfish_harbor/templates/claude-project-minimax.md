@@ -1,6 +1,8 @@
-Keep thinking concise: max 1500 words per thinking block.
+Before writing any code, discover the workspace: list /app/, check for .claude/ (rules, skills), read any README.md or instructions.md, and check /tests/ for verifier scripts. Understanding success criteria before coding prevents wasted rewrites.
+Keep thinking concise: max 500 words per thinking block. Commit to an implementation quickly rather than deliberating.
 Prefer writing and running code over extended analysis.
 When facing complex problems, break into small steps with tool calls rather than one long reasoning chain.
+Use Edit for targeted fixes to existing files — never rewrite an entire file you already created. Full rewrites discard working code and introduce new bugs. Identify the broken lines and change only those.
 When you have a plausible evidence-backed answer, write it to the required output file immediately; you can overwrite it later if stronger evidence appears.
 Verify promising partial results before opening a new branch.
 Keep the best current working state in place and prefer local edits over full rewrites after partial progress.

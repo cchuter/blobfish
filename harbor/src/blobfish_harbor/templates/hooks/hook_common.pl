@@ -302,6 +302,35 @@ sub write_run_state {
     write_text(state_path('run_state_summary'), $summary);
 }
 
+sub detect_repetition_loop {
+    # Track last N tool calls. If the same tool+target repeats 3+ times
+    # consecutively, return a warning message.
+    my ($tool_name, $file_path, $command) = @_;
+    my $key = $tool_name;
+    $key .= ":$file_path" if defined $file_path && $file_path ne '';
+    $key .= ":" . substr($command, 0, 40) if defined $command && $command ne '';
+
+    my $history_path = state_path('tool_history');
+    my @history = read_lines($history_path);
+    push @history, $key;
+    @history = @history[-6 .. -1] if @history > 6;
+    write_text($history_path, join("\n", @history) . "\n");
+
+    # Check for 3+ consecutive identical entries
+    if (@history >= 3) {
+        my $last = $history[-1];
+        my $repeat = 0;
+        for my $h (reverse @history) {
+            last if $h ne $last;
+            $repeat++;
+        }
+        if ($repeat >= 3) {
+            return "LOOP DETECTED: You have repeated the same action ($tool_name) $repeat times. STOP and try a different approach. If editing code, try adding debug prints first. If running tests, read the error message more carefully.";
+        }
+    }
+    return '';
+}
+
 sub mark_pending_validation {
     write_text(state_path('pending_validation'), "1\n");
     write_text(state_path('stop_blocked'), "0\n");

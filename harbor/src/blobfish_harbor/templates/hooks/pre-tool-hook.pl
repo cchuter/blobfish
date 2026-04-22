@@ -25,6 +25,30 @@ if ($mutated_reason ne '') {
     exit 0;
 }
 
+# Write-guard: block whole-file Write on existing /app/ files, force Edit instead.
+# First Write to a new file is always allowed. Subsequent writes to the same path
+# are blocked — the agent must use Edit for targeted changes.
+if ($tool_name eq 'Write' && defined $file_path && index($file_path, '/app/') == 0) {
+    my $write_count_file = state_path('write_guard_counts');
+    my %counts;
+    for my $line (read_lines($write_count_file)) {
+        if ($line =~ /^(\d+)\t(.+)$/) { $counts{$2} = int($1); }
+    }
+    my $prev = $counts{$file_path} // 0;
+    $counts{$file_path} = $prev + 1;
+    my $text = join('', map { "$counts{$_}\t$_\n" } keys %counts);
+    write_text($write_count_file, $text);
+
+    if ($prev >= 1) {
+        log_line("PreToolUse write_guard_block tool=Write path=$file_path count=$counts{$file_path}");
+        emit_permission_decision(
+            'deny',
+            "BLOCKED: You already wrote $file_path. Use the Edit tool for targeted changes instead of rewriting the entire file. Full rewrites discard working code and introduce new bugs. Identify the specific lines that need to change and edit only those.",
+        );
+        exit 0;
+    }
+}
+
 my $measured_reason = measured_overwrite_reason($tool_name, $file_path);
 if ($measured_reason ne '') {
     log_line("PreToolUse preserve_measured_overwrite tool=$tool_name");

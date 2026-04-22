@@ -192,7 +192,7 @@ class BlobfishAgent(BaseInstalledAgent):
         elif "MAX_THINKING_TOKENS" in os.environ:
             env["MAX_THINKING_TOKENS"] = os.environ["MAX_THINKING_TOKENS"]
         else:
-            env["MAX_THINKING_TOKENS"] = "10000"
+            env["MAX_THINKING_TOKENS"] = "2048"
 
         env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = os.environ.get(
             "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "48000"
