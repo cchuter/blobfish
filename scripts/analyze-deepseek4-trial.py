@@ -44,6 +44,18 @@ def load_pass_fail(trial_dir: Path) -> dict[str, float]:
     return out
 
 
+def _coerce_args(args) -> dict:
+    if isinstance(args, dict):
+        return args
+    if isinstance(args, str):
+        try:
+            parsed = json.loads(args)
+            return parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+    return {}
+
+
 def _parse_ts(ts: str | None) -> float | None:
     if not ts or not isinstance(ts, str):
         return None
@@ -73,7 +85,9 @@ def extract_tool_uses(trajectory: dict) -> list[dict]:
     for s in steps:
         if not isinstance(s, dict):
             continue
-        extra = s.get("extra") or {}
+        extra = s.get("extra")
+        if not isinstance(extra, dict):
+            extra = {}
         tool_calls = s.get("tool_calls") or []
         # Identify tool name
         name = extra.get("tool_use_name")
@@ -94,7 +108,10 @@ def extract_tool_uses(trajectory: dict) -> list[dict]:
                 c = r.get("content") if isinstance(r, dict) else None
                 if isinstance(c, str):
                     out_parts.append(c)
-        meta = (extra.get("tool_result_metadata") or {}).get("tool_use_result") or {}
+        trm = extra.get("tool_result_metadata")
+        trm = trm if isinstance(trm, dict) else {}
+        meta = trm.get("tool_use_result")
+        meta = meta if isinstance(meta, dict) else {}
         for k in ("stdout", "stderr"):
             v = meta.get(k)
             if isinstance(v, str) and v:
@@ -104,7 +121,7 @@ def extract_tool_uses(trajectory: dict) -> list[dict]:
         tool_uses.append(
             {
                 "name": name,
-                "input": args if isinstance(args, dict) else {},
+                "input": _coerce_args(args),
                 "output": "\n".join(out_parts),
                 "is_error": bool(extra.get("tool_result_is_error")),
                 "ts": ts,
