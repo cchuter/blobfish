@@ -475,8 +475,6 @@ def _prompt_template_path(prompt_variant: str) -> Path:
         return TEMPLATES_DIR / "prompt-minimax.md.j2"
     if prompt_variant == "qwen":
         return TEMPLATES_DIR / "prompt-qwen.md.j2"
-    if prompt_variant == "deepseek":
-        return TEMPLATES_DIR / "prompt-deepseek.md.j2"
     return TEMPLATES_DIR / "prompt.md.j2"
 
 
