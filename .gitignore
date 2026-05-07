@@ -19,3 +19,6 @@ agents/*/secrets.env
 
 # Internal Docs
 docs/
+
+# Git worktrees
+.worktrees/
