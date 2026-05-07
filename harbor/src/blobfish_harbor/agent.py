@@ -428,10 +428,14 @@ def _normalize_prompt_variant(prompt_variant: str | None) -> str:
         "qwen3": "qwen",
         "qwen3.5": "qwen",
         "qwen3.6": "qwen",
+        "deepseek-v4": "deepseek",
+        "deepseek-v4-flash": "deepseek",
+        "deepseek_v4": "deepseek",
+        "deepseek4": "deepseek",
     }
     value = aliases.get(value, value)
-    if value not in {"auto", "full", "slim", "minimax", "qwen"}:
-        raise ValueError("prompt_variant must be one of: auto, full, slim, minimax, qwen")
+    if value not in {"auto", "full", "slim", "minimax", "qwen", "deepseek"}:
+        raise ValueError("prompt_variant must be one of: auto, full, slim, minimax, qwen, deepseek")
     return value
 
 
@@ -442,6 +446,8 @@ def _resolve_prompt_variant(prompt_variant: str, model_name: str | None) -> str:
         return "minimax"
     if _is_qwen(model_name):
         return "qwen"
+    if _is_deepseek(model_name):
+        return "deepseek"
     return "full"
 
 
@@ -457,6 +463,12 @@ def _is_qwen(model_name: str | None) -> bool:
     return "qwen" in model_name.lower()
 
 
+def _is_deepseek(model_name: str | None) -> bool:
+    if not model_name:
+        return False
+    return "deepseek" in model_name.lower()
+
+
 def _prompt_template_path(prompt_variant: str) -> Path:
     if prompt_variant == "slim":
         return TEMPLATES_DIR / "prompt-slim.md.j2"
@@ -464,6 +476,8 @@ def _prompt_template_path(prompt_variant: str) -> Path:
         return TEMPLATES_DIR / "prompt-minimax.md.j2"
     if prompt_variant == "qwen":
         return TEMPLATES_DIR / "prompt-qwen.md.j2"
+    if prompt_variant == "deepseek":
+        return TEMPLATES_DIR / "prompt-deepseek.md.j2"
     return TEMPLATES_DIR / "prompt.md.j2"
 
 
@@ -472,6 +486,8 @@ def _project_claude_md(prompt_variant: str) -> str:
         path = TEMPLATES_DIR / "claude-project-minimax.md"
     elif prompt_variant == "qwen":
         path = TEMPLATES_DIR / "claude-project-qwen.md"
+    elif prompt_variant == "deepseek":
+        path = TEMPLATES_DIR / "claude-project-deepseek4.md"
     else:
         path = TEMPLATES_DIR / "claude-project-default.md"
     return path.read_text()
