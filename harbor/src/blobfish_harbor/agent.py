@@ -430,8 +430,7 @@ def _normalize_prompt_variant(prompt_variant: str | None) -> str:
         "qwen3.6": "qwen",
         "deepseek-v4": "deepseek",
         "deepseek-v4-flash": "deepseek",
-        "deepseek_v4": "deepseek",
-        "deepseek4": "deepseek",
+        "deepseekv4": "deepseek",
     }
     value = aliases.get(value, value)
     if value not in {"auto", "full", "slim", "minimax", "qwen", "deepseek"}:
@@ -487,7 +486,7 @@ def _project_claude_md(prompt_variant: str) -> str:
     elif prompt_variant == "qwen":
         path = TEMPLATES_DIR / "claude-project-qwen.md"
     elif prompt_variant == "deepseek":
-        path = TEMPLATES_DIR / "claude-project-deepseek4.md"
+        path = TEMPLATES_DIR / "claude-project-deepseek.md"
     else:
         path = TEMPLATES_DIR / "claude-project-default.md"
     return path.read_text()
