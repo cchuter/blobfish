@@ -228,6 +228,10 @@ if [[ -n "$ANTHROPIC_BASE_URL" ]]; then
   DOCKER_BASE_URL="${DOCKER_BASE_URL//127.0.0.1/host.docker.internal}"
   CMD+=( --ae "ANTHROPIC_BASE_URL=$DOCKER_BASE_URL" )
   CMD+=( --ae "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-no-key}" )
+  # Local model inference is slower than the cloud API. Claude Code's default
+  # request timeout (~60s) hangs up mid-stream on long-context turns; oMLX's
+  # own Claude Code integration sets 3000000ms (50min) for the same reason.
+  CMD+=( --ae "API_TIMEOUT_MS=${API_TIMEOUT_MS:-3000000}" )
   CMD+=( --ek "network_mode=host" )
   CMD+=( --no-force-build )
 fi
