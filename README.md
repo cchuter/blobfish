@@ -158,6 +158,9 @@ Prompt variants:
 # Explicit MiniMax prompt
 ./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --prompt-variant minimax --model minimax/minimax-m2.5 -k 1
 
+# Explicit DeepSeek prompt with a tighter thinking budget
+./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --prompt-variant deepseek --model deepseek-v4-flash --max-thinking-tokens 2048 -k 1
+
 # No prompt template
 ./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude --no-prompt -k 1
 
@@ -165,7 +168,7 @@ Prompt variants:
 ./scripts/run-terminal-bench.sh --agent-name cchuter --backend claude -t "fix-git*" -k 1 -n 1
 ```
 
-When `prompt_variant=auto`, Blobfish uses the MiniMax-specific prompt + `CLAUDE.md` profile for any model with "minimax" in its name, the Qwen-specific profile for any model with "qwen" in its name, and the default profile for everything else.
+When `prompt_variant=auto`, Blobfish uses the MiniMax-specific prompt + `CLAUDE.md` profile for any model with "minimax" in its name, the Qwen-specific profile for any model with "qwen" in its name, the DeepSeek-specific profile for any model with "deepseek" in its name, and the default profile for everything else.
 
 Runner switches:
 

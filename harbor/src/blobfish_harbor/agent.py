@@ -22,6 +22,9 @@ from harbor.models.trial.result import AgentInfo, ModelInfo
 
 DEFAULT_AGENT_ORG = "teamblobfish.com"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-pro"
+DEEPSEEK_DEFAULT_SMALL_MODEL = "deepseek-v4-flash"
 
 
 class BlobfishAgent(BaseInstalledAgent):
@@ -41,16 +44,24 @@ class BlobfishAgent(BaseInstalledAgent):
         openai_api_key: str | None = None,
         reasoning_effort: str | None = "high",
         max_thinking_tokens: int | None = None,
+        deepseek_base_url: str | None = None,
+        deepseek_api_key: str | None = None,
+        deepseek_effort: str | None = "max",
+        deepseek_small_model: str | None = DEEPSEEK_DEFAULT_SMALL_MODEL,
+        task_timeout_multiplier: float | str | None = None,
         use_prompt: bool = True,
         prompt_variant: str = "auto",
         claude_runtime_profile: str = "blobfish",
         *args,
         **kwargs,
     ):
+        backend_value = (backend or "claude").strip().lower()
         requested_prompt_variant = _normalize_prompt_variant(prompt_variant)
         resolved_prompt_variant = _resolve_prompt_variant(
             requested_prompt_variant,
-            kwargs.get("model_name") or default_model,
+            kwargs.get("model_name")
+            or default_model
+            or (DEEPSEEK_DEFAULT_MODEL if backend_value == "deepseek" else None),
         )
         if not use_prompt or str(use_prompt).lower() == "false":
             kwargs["prompt_template_path"] = None
@@ -62,9 +73,9 @@ class BlobfishAgent(BaseInstalledAgent):
         self._agent_name = _resolve_agent_name(agent_name)
         self._agent_org = (agent_org or DEFAULT_AGENT_ORG).strip() or DEFAULT_AGENT_ORG
 
-        self._default_backend = (backend or "claude").strip().lower()
-        if self._default_backend not in {"claude", "codex"}:
-            raise ValueError("backend must be one of: claude, codex")
+        self._default_backend = backend_value
+        if self._default_backend not in {"claude", "codex", "deepseek"}:
+            raise ValueError("backend must be one of: claude, codex, deepseek")
         self._prompt_variant = requested_prompt_variant
 
         self._default_model_selector = (default_model or "").strip() or None
@@ -86,6 +97,16 @@ class BlobfishAgent(BaseInstalledAgent):
 
         self._openai_base_url = (openai_base_url or "").strip() or None
         self._openai_api_key = (openai_api_key or "").strip() or None
+        self._deepseek_base_url = _normalize_deepseek_anthropic_base_url(
+            deepseek_base_url
+            or os.environ.get("DEEPSEEK_ANTHROPIC_BASE_URL")
+            or os.environ.get("DEEPSEEK_BASE_URL")
+            or DEEPSEEK_ANTHROPIC_BASE_URL
+        )
+        self._deepseek_api_key = (deepseek_api_key or "").strip() or None
+        self._deepseek_effort = (deepseek_effort or "").strip() or None
+        self._deepseek_small_model = (deepseek_small_model or "").strip() or None
+        self._task_timeout_multiplier = _optional_float(task_timeout_multiplier, default=1.0)
 
     @staticmethod
     def name() -> str:
@@ -146,6 +167,8 @@ class BlobfishAgent(BaseInstalledAgent):
 
         if backend == "codex" and not model_name and self._codex_model:
             model_name = self._codex_model
+        if backend == "deepseek" and not model_name:
+            model_name = os.environ.get("DEEPSEEK_MODEL") or DEEPSEEK_DEFAULT_MODEL
 
         return backend, model_name
 
@@ -154,23 +177,50 @@ class BlobfishAgent(BaseInstalledAgent):
         backend, model_name = self._resolve_backend_and_model()
         if backend == "codex":
             return self._create_codex_run_commands(escaped, model_name=model_name)
-        return self._create_claude_run_commands(escaped, model_name=model_name)
+        return self._create_claude_run_commands(
+            escaped,
+            model_name=model_name,
+            deepseek_api=backend == "deepseek",
+        )
 
     def _create_claude_run_commands(
-        self, escaped_instruction: str, model_name: str | None = None
+        self,
+        escaped_instruction: str,
+        model_name: str | None = None,
+        *,
+        deepseek_api: bool = False,
     ) -> list[ExecInput]:
         env: dict[str, str] = {
             "BLOBFISH_AGENT_NAME": self._agent_name,
             "BLOBFISH_AGENT_ORG": self._agent_org,
             "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""),
+            "ANTHROPIC_AUTH_TOKEN": os.environ.get("ANTHROPIC_AUTH_TOKEN", ""),
             "CLAUDE_CODE_OAUTH_TOKEN": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""),
         }
 
-        base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
-        if base_url:
-            env["ANTHROPIC_BASE_URL"] = _rewrite_localhost_for_docker(base_url) or base_url
+        if deepseek_api:
+            deepseek_key = (
+                self._deepseek_api_key
+                or os.environ.get("DEEPSEEK_API_KEY")
+                or os.environ.get("ANTHROPIC_AUTH_TOKEN")
+                or os.environ.get("ANTHROPIC_API_KEY")
+                or ""
+            )
+            env["ANTHROPIC_BASE_URL"] = self._deepseek_base_url
+            env["ANTHROPIC_AUTH_TOKEN"] = deepseek_key
+            env["ANTHROPIC_API_KEY"] = deepseek_key
+            env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        else:
+            base_url = os.environ.get("ANTHROPIC_BASE_URL", "")
+            if base_url:
+                env["ANTHROPIC_BASE_URL"] = _rewrite_localhost_for_docker(base_url) or base_url
 
-        if not env.get("ANTHROPIC_API_KEY") and not env.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        if (
+            not deepseek_api
+            and not env.get("ANTHROPIC_API_KEY")
+            and not env.get("ANTHROPIC_AUTH_TOKEN")
+            and not env.get("CLAUDE_CODE_OAUTH_TOKEN")
+        ):
             token = _read_oauth_token()
             if token:
                 env["CLAUDE_CODE_OAUTH_TOKEN"] = token
@@ -180,6 +230,14 @@ class BlobfishAgent(BaseInstalledAgent):
         if model_name:
             selected_model = model_name.split("/", 1)[1] if "/" in model_name else model_name
             env["ANTHROPIC_MODEL"] = selected_model
+            if deepseek_api:
+                env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = selected_model
+                env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = selected_model
+                env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = self._deepseek_small_model or selected_model
+                env["CLAUDE_CODE_SUBAGENT_MODEL"] = self._deepseek_small_model or selected_model
+
+        if deepseek_api and self._deepseek_effort:
+            env["CLAUDE_CODE_EFFORT_LEVEL"] = self._deepseek_effort
 
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
         env["IS_SANDBOX"] = "1"
@@ -198,7 +256,10 @@ class BlobfishAgent(BaseInstalledAgent):
             "CLAUDE_CODE_MAX_OUTPUT_TOKENS", "48000"
         )
         env["TASK_START_EPOCH"] = str(int(time.time()))
-        task_timeout_sec = _resolve_task_timeout_sec(self._get_task_name())
+        task_timeout_sec = _resolve_task_timeout_sec(
+            self._get_task_name(),
+            multiplier=self._task_timeout_multiplier,
+        )
         if task_timeout_sec is not None:
             env["TASK_TIMEOUT_SECS"] = str(task_timeout_sec)
         existing_path = os.environ.get("PATH", "")
@@ -475,6 +536,8 @@ def _prompt_template_path(prompt_variant: str) -> Path:
         return TEMPLATES_DIR / "prompt-minimax.md.j2"
     if prompt_variant == "qwen":
         return TEMPLATES_DIR / "prompt-qwen.md.j2"
+    if prompt_variant == "deepseek":
+        return TEMPLATES_DIR / "prompt-deepseek.md.j2"
     return TEMPLATES_DIR / "prompt.md.j2"
 
 
@@ -563,6 +626,7 @@ exit "$rc"
         "$CLAUDE_CONFIG_DIR/shell-snapshots $CLAUDE_CONFIG_DIR/statsig "
         "$CLAUDE_CONFIG_DIR/todos /tmp/blobfish-bin && "
         f"printf %s {shlex.quote(claude_md)} > $CLAUDE_CONFIG_DIR/projects/-app/CLAUDE.md && "
+        f"printf %s {shlex.quote(claude_md)} > /app/CLAUDE.md && "
         f"printf %s {shlex.quote(timed_script)} > /tmp/blobfish-bin/timed && "
         "chmod +x /tmp/blobfish-bin/timed && "
         "{ echo '=== SYSTEM ===' && uname -a && "
@@ -630,6 +694,7 @@ fi
         "cp -r ~/.claude/skills $CLAUDE_CONFIG_DIR/skills 2>/dev/null || true; "
         "fi && "
         f"printf %s {shlex.quote(claude_md)} > $CLAUDE_CONFIG_DIR/projects/-app/CLAUDE.md && "
+        f"printf %s {shlex.quote(claude_md)} > /app/CLAUDE.md && "
         f"printf %s {shlex.quote(constraint_rule)} > /app/.claude/rules/constraint-first-debugging.md && "
         f"printf %s {shlex.quote(constraint_skill)} > /app/.claude/skills/constraint-first-debugging/SKILL.md && "
         f"printf %s {shlex.quote(deadline_rule)} > /app/.claude/rules/deadline-aware-delivery.md && "
@@ -659,7 +724,11 @@ fi
     )
 
 
-def _resolve_task_timeout_sec(task_name: str | None) -> int | None:
+def _resolve_task_timeout_sec(
+    task_name: str | None,
+    *,
+    multiplier: float | None = 1.0,
+) -> int | None:
     if not task_name:
         return None
 
@@ -677,10 +746,20 @@ def _resolve_task_timeout_sec(task_name: str | None) -> int | None:
         if timeout is None:
             continue
         try:
-            return int(float(timeout))
+            scaled = float(timeout) * (multiplier if multiplier and multiplier > 0 else 1.0)
+            return int(scaled)
         except (TypeError, ValueError):
             continue
     return None
+
+
+def _optional_float(value: float | str | None, *, default: float | None = None) -> float | None:
+    if value is None or value == "":
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _read_oauth_token() -> str | None:
@@ -722,7 +801,7 @@ def _apply_selector(
         return backend, model_name
 
     low = value.lower()
-    if low in {"claude", "codex"}:
+    if low in {"claude", "codex", "deepseek"}:
         return low, model_name
 
     inferred = _infer_backend_from_model(value)
@@ -733,6 +812,8 @@ def _infer_backend_from_model(model_name: str) -> str | None:
     low = model_name.lower()
     if "codex" in low or low.startswith("openai/"):
         return "codex"
+    if "deepseek" in low:
+        return "deepseek"
     if "claude" in low or low.startswith("anthropic/"):
         return "claude"
     return None
@@ -745,7 +826,9 @@ def _looks_incompatible_model_for_backend(model_name: str | None, backend: str) 
     if backend == "claude":
         return "codex" in low or low.startswith("openai/")
     if backend == "codex":
-        return "claude" in low or low.startswith("anthropic/")
+        return "claude" in low or low.startswith("anthropic/") or "deepseek" in low
+    if backend == "deepseek":
+        return "codex" in low or low.startswith("openai/") or "claude" in low or low.startswith("anthropic/")
     return False
 
 
@@ -765,3 +848,14 @@ def _rewrite_localhost_for_docker(url: str | None) -> str | None:
 
     netloc = parsed.netloc.replace(parsed.hostname, host_gateway, 1)
     return urlunparse(parsed._replace(netloc=netloc))
+
+
+def _normalize_deepseek_anthropic_base_url(url: str | None) -> str:
+    value = (url or DEEPSEEK_ANTHROPIC_BASE_URL).strip().rstrip("/")
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return value
+    if parsed.hostname == "api.deepseek.com" and parsed.path in {"", "/", "/v1"}:
+        return DEEPSEEK_ANTHROPIC_BASE_URL
+    return value
